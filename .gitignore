@@ -1,0 +1,28 @@
+# Cache
+.cache/
+.idea/
+.vscode/
+
+# Xmake cache
+.xmake/
+build/
+compile_commands.json
+
+# MacOS Cache
+.DS_Store
+
+# Compile output
+*.a
+*.lib
+*.dll
+*.so
+*.exe
+*.obj
+*.o
+*.pcm
+
+# Other
+*.json
+
+# Make
+Makefile

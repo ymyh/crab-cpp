@@ -1,0 +1,1 @@
+#define match(...) ::crab_cpp::internal::matcher{__VA_ARGS__} ->* ::crab_cpp::internal::overload
