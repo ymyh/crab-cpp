@@ -17,9 +17,9 @@ export namespace crab_cpp::internal
         constexpr matcher(Vs &&...vs) : vs(std::forward<Vs>(vs)...) {}
 
         template<typename Fs>
-        constexpr auto operator->*(Fs &&f) const
+        constexpr auto operator->*(Fs&& f) const
         {
-            auto curry = [&](auto &&...vss) { return std::visit(std::forward<Fs>(f), vss...); };
+            auto curry = [&](auto&&... vss) { return std::visit(std::forward<Fs>(f), vss...); };
     	    return std::apply(curry, std::move(vs));
         }
     };
