@@ -1,12 +1,13 @@
 module;
 
+#include <stddef.h>
 #include "include/utf8proc.h"
 
 export module crab_cpp:string;
 
+import :panic;
 import :option;
 import :result;
-import :panic;
 import std;
 
 /**
@@ -25,6 +26,11 @@ struct compressed_pair : private T1
 
     [[nodiscard]] constexpr auto first() noexcept -> T1& { return *this; }
     [[nodiscard]] constexpr auto first() const noexcept -> const T1& { return *this; }
+
+    [[nodiscard]] constexpr static auto offset_of_second() noexcept -> size_t
+    {
+        return 0;
+    }
 };
 
 template<typename T1, typename T2>
@@ -37,6 +43,11 @@ struct compressed_pair<T1, T2, false>
 
     [[nodiscard]] constexpr auto get_first() noexcept -> T1& { return first; }
     [[nodiscard]] constexpr auto get_first() const noexcept -> const T1& { return first; }
+
+    [[nodiscard]] constexpr static auto offset_of_second() noexcept -> size_t
+    {
+        return __builtin_offsetof(compressed_pair<T1, T2, false>, second);
+    }
 };
 
 export namespace crab_cpp
@@ -54,6 +65,44 @@ struct FromUtf8Error
      */
     constexpr explicit FromUtf8Error(std::size_t pos) noexcept : pos(pos) {}
 };
+
+/**
+ * @brief Validates if the given string is valid UTF-8
+ * @param str The string to validate
+ * @param len The length of the string in bytes
+ * @return true if the string is valid UTF-8
+ */
+[[nodiscard]] constexpr auto is_valid_utf8(const char* str, std::size_t len) noexcept -> bool
+{
+    if (str == nullptr || len == 0)
+    {
+        return true;
+    }
+
+    utf8proc_int32_t codepoint;
+    std::size_t pos = 0;
+
+    while (pos < len)
+    {
+        utf8proc_ssize_t result = utf8proc_iterate(
+            reinterpret_cast<const utf8proc_uint8_t*>(str + pos),
+            len - pos,
+            &codepoint
+        );
+
+        if (result < 0)
+        {
+            return false;
+        }
+        pos += result;
+    }
+    return true;
+}
+
+[[nodiscard]] constexpr auto is_valid_utf8(const std::byte* str, std::size_t len) noexcept -> bool
+{
+    return is_valid_utf8(std::bit_cast<const char*>(str), len);
+}
 
 /**
  * @brief A class representing a Unicode scalar value
@@ -184,13 +233,9 @@ public:
     }
 };
 
-template<typename Alloc>
-struct String;
-
-template<bool Const = false>
-struct basic_str
+struct str
 {
-    using pointer = std::conditional_t<Const, const std::byte*, std::byte*>;
+    using pointer = const std::byte*;
 
 private:
     pointer m_data;  // Pointer to string data
@@ -199,28 +244,28 @@ private:
     /**
      * @brief Private constructor for internal use
      */
-    constexpr basic_str(pointer data, std::size_t len) noexcept : m_data(data), m_len(len) {}
+    constexpr str(pointer data, std::size_t len) noexcept : m_data(data), m_len(len) {}
 
 public:
     /**
      * @brief Default constructor
      */
-    constexpr basic_str() noexcept : m_data(nullptr), m_len(0) {}
+    constexpr str() noexcept : m_data(nullptr), m_len(0) {}
 
     /**
      * @brief Creates a string view from a pointer and length
      * @param data Pointer to string data
      * @param len Length of the string
-     * @return A Result containing either a Str or a FromUtf8Error
+     * @return A Result containing either a str or a FromUtf8Error
      */
-    [[nodiscard]] static constexpr auto from_raw_parts(const char* data, std::size_t len) noexcept -> Result<basic_str<Const>, FromUtf8Error>
+    [[nodiscard]] static constexpr auto from_raw_parts(const char* data, std::size_t len) noexcept -> Result<str, FromUtf8Error>
     {
         if (data == nullptr && len > 0)
         {
             return FromUtf8Error(0);
         }
 
-        if (!basic_str<true>::is_valid_utf8(data, len))
+        if (!is_valid_utf8(data, len))
         {
             // Find the position of the invalid UTF-8 sequence
             utf8proc_int32_t codepoint;
@@ -242,50 +287,22 @@ public:
             }
         }
 
-        return basic_str<Const>(std::bit_cast<pointer>(data), len);
+        return str(std::bit_cast<pointer>(data), len);
+    }
+
+    [[nodiscard]] static constexpr auto from_bytes_unchecked(pointer data, std::size_t len) noexcept -> str
+    {
+        return str(data, len);
     }
 
     /**
      * @brief Creates a string view from a null-terminated string
      * @param data Pointer to null-terminated string
-     * @return A Result containing either a Str or a FromUtf8Error
+     * @return A Result containing either a str or a FromUtf8Error
      */
-    [[nodiscard]] static constexpr auto from_raw_parts(const char* data) noexcept -> Result<basic_str<Const>, FromUtf8Error>
+    [[nodiscard]] static constexpr auto from(const char* data) noexcept -> Result<str, FromUtf8Error>
     {
-        return from_raw_parts(data, data != nullptr ? std::strlen(data) : 0);
-    }
-
-    /**
-     * @brief Validates if the given string is valid UTF-8
-     * @param str The string to validate
-     * @param len The length of the string in bytes
-     * @return true if the string is valid UTF-8
-     */
-    [[nodiscard]] static constexpr auto is_valid_utf8(const char* str, std::size_t len) noexcept -> bool
-    {
-        if (str == nullptr || len == 0)
-        {
-            return true;
-        }
-
-        utf8proc_int32_t codepoint;
-        std::size_t pos = 0;
-
-        while (pos < len)
-        {
-            utf8proc_ssize_t result = utf8proc_iterate(
-                reinterpret_cast<const utf8proc_uint8_t*>(str + pos),
-                len - pos,
-                &codepoint
-            );
-
-            if (result < 0)
-            {
-                return false;
-            }
-            pos += result;
-        }
-        return true;
+        return str::from_raw_parts(data, data != nullptr ? std::strlen(data) : 0);
     }
 
 public:
@@ -295,13 +312,13 @@ public:
      */
     [[nodiscard]] constexpr auto as_bytes() const noexcept -> std::span<const std::byte>
     {
-        return std::span<std::conditional_t<Const, const std::byte, std::byte>>(this->m_data, this->m_len);
+        return std::span<const std::byte>(this->m_data, this->m_len);
     }
 
     /**
      * @brief Returns the length of the string in bytes
      */
-    [[nodiscard]] constexpr auto len() const noexcept -> std::size_t
+    [[nodiscard]] constexpr auto size() const noexcept -> std::size_t
     {
         return this->m_len;
     }
@@ -322,7 +339,62 @@ public:
         return this->m_len == 0;
     }
 
-    [[nodiscard]] constexpr auto operator<=>(const basic_str<Const>& other) const noexcept -> std::strong_ordering
+    /**
+     * @brief Checks if this string starts with the given pattern
+     * @param pattern The pattern to check for
+     * @return true if this string starts with the pattern
+     */
+    [[nodiscard]] constexpr auto starts_with(const str& pattern) const noexcept -> bool
+    {
+        if (pattern.m_len > this->m_len)
+        {
+            return false;
+        }
+
+        if (pattern.m_len == 0)
+        {
+            return true;
+        }
+
+        return std::memcmp(this->m_data, pattern.m_data, pattern.m_len) == 0;
+    }
+
+    /**
+     * @brief Checks if this string ends with the given pattern
+     * @param pattern The pattern to check for
+     * @return true if this string ends with the pattern
+     */
+    [[nodiscard]] constexpr auto ends_with(const str& pattern) const noexcept -> bool
+    {
+        if (pattern.m_len > this->m_len)
+        {
+            return false;
+        }
+
+        if (pattern.m_len == 0)
+        {
+            return true;
+        }
+
+        return std::memcmp(
+            this->m_data + (this->m_len - pattern.m_len),
+            pattern.m_data,
+            pattern.m_len
+        ) == 0;
+    }
+
+    /**
+     * @brief Converts the String to a std::string
+     * @return A std::string containing the String's contents
+     */
+    [[nodiscard]] constexpr auto to_std_string() const -> std::string
+    {
+        return std::string(reinterpret_cast<const char*>(this->m_data), this->m_len);
+    }
+
+// operators
+public:
+    [[nodiscard]] constexpr auto operator<=>(const str& other) const noexcept -> std::strong_ordering
     {
         const std::size_t min_len = std::min(this->m_len, other.m_len);
         if (min_len == 0)
@@ -339,7 +411,7 @@ public:
         return this->m_len <=> other.m_len;
     }
 
-    [[nodiscard]] constexpr auto operator==(const basic_str<Const>& other) const noexcept -> bool
+    [[nodiscard]] constexpr auto operator==(const str& other) const noexcept -> bool
     {
         if (this->m_len != other.m_len) {
             return false;
@@ -347,9 +419,6 @@ public:
         return std::memcmp(this->m_data, other.m_data, this->m_len) == 0;
     }
 };
-
-using str_mut = basic_str<false>;
-using str = basic_str<true>;
 
 /**
  * @brief A UTF-8–encoded, growable string with custom allocator support
@@ -361,6 +430,13 @@ struct String
     using pointer = typename std::allocator_traits<Alloc>::pointer;
 
 private:
+    struct StrProxy
+    {
+        str value;
+
+        constexpr explicit StrProxy(const str& s) noexcept : value(s) {}
+        constexpr auto operator->() const noexcept -> const str* { return &value; }
+    };
 
     compressed_pair<Alloc, pointer> m_alloc_and_data;
     std::size_t m_len;
@@ -385,11 +461,14 @@ private:
             return;
         }
 
+        // Add 1 to capacity for null terminator
         this->m_alloc_and_data.second = std::allocator_traits<Alloc>::allocate(
             this->m_alloc_and_data.first(),
-            capacity
+            capacity + 1
         );
         this->m_capacity = capacity;
+        // Add null terminator
+        this->m_alloc_and_data.second[0] = std::byte{0};
     }
 
 // constructors
@@ -404,9 +483,7 @@ public:
      * @param str The str to construct from
      * @param alloc The allocator to use
      */
-    template<typename S>
-        requires (std::is_same_v<S, str> || std::is_same_v<S, const str_mut>)
-    constexpr explicit String(const S& str, const Alloc& alloc = Alloc()) : String(alloc, str.data(), str.len(), str.len()) {}
+    constexpr explicit String(const str& str, const Alloc& alloc = Alloc()) : String(alloc, str.data(), str.size(), str.size()) {}
 
     /**
      * @brief Creates a string from a UTF-8 string
@@ -424,7 +501,7 @@ public:
             return String(alloc_copy, nullptr, 0, 0);
         }
 
-        auto result = basic_str<false>::from_raw_parts(str, len);
+        auto result = str::from_raw_parts(str, len);
         if (result.is_err())
         {
             return result.unwrap_err();
@@ -441,7 +518,7 @@ public:
      * @param alloc The allocator to use
      * @return A Result containing either a String or a FromUtf8Error
      */
-    [[nodiscard]] static auto from_raw_parts(const char* str, const Alloc& alloc = Alloc()) noexcept -> Result<String, FromUtf8Error>
+    [[nodiscard]] static auto from(const char* str, const Alloc& alloc = Alloc()) noexcept -> Result<String, FromUtf8Error>
     {
         return from_raw_parts(str, std::strlen(str), alloc);
     }
@@ -490,7 +567,7 @@ public:
             std::allocator_traits<Alloc>::deallocate(
                 this->m_alloc_and_data.first(),
                 this->m_alloc_and_data.second,
-                this->m_capacity
+                this->m_capacity + 1
             );
         }
     }
@@ -546,7 +623,7 @@ public:
      * @brief Returns the current length of the string in bytes
      * @return The length in bytes
      */
-    [[nodiscard]] constexpr auto len() const noexcept -> std::size_t
+    [[nodiscard]] constexpr auto size() const noexcept -> std::size_t
     {
         return this->m_len;
     }
@@ -563,10 +640,10 @@ public:
             return;
         }
 
-        // Allocate new memory
+        // Allocate new memory (add 1 for null terminator)
         pointer new_data = std::allocator_traits<Alloc>::allocate(
             this->m_alloc_and_data.first(),
-            new_capacity
+            new_capacity + 1
         );
 
         // Copy existing data
@@ -576,6 +653,8 @@ public:
                      this->m_alloc_and_data.second + this->m_len,
                      new_data);
         }
+        // Add null terminator
+        new_data[this->m_len] = std::byte{0};
 
         // Deallocate old memory
         if (this->m_alloc_and_data.second != nullptr)
@@ -583,7 +662,7 @@ public:
             std::allocator_traits<Alloc>::deallocate(
                 this->m_alloc_and_data.first(),
                 this->m_alloc_and_data.second,
-                this->m_capacity
+                this->m_capacity + 1
             );
         }
 
@@ -618,37 +697,96 @@ public:
 
         std::copy(utf8, utf8 + len, this->m_alloc_and_data.second + this->m_len);
         this->m_len = new_len;
+        // Add null terminator
+        this->m_alloc_and_data.second[this->m_len] = std::byte{0};
     }
 
     /**
-     * @brief Appends a given Str onto the end of this String.
-     * @param str The Str to append
+     * @brief Appends a given str onto the end of this String.
+     * @param str The str to append
      */
-    template<typename S>
-        requires (std::is_same_v<S, str> || std::is_same_v<S, const str_mut>)
-    auto push_str(const S& str) -> void
+    auto push_str(const str& str) -> void
     {
         if (str.empty())
         {
             return;
         }
 
-        const std::size_t new_len = this->m_len + str.len();
+        const std::size_t new_len = this->m_len + str.size();
         if (new_len > this->m_capacity)
         {
             this->reserve(new_len - this->m_capacity);
         }
 
-        std::copy(str.data(), str.data() + str.len(), this->m_alloc_and_data.second + this->m_len);
+        std::copy(str.data(), str.data() + str.size(), this->m_alloc_and_data.second + this->m_len);
         this->m_len = new_len;
+        // Add null terminator
+        this->m_alloc_and_data.second[this->m_len] = std::byte{0};
+    }
+
+    /**
+     * @brief Appends a given C-string onto the end of this String.
+     * @param str The C-string to append
+     */
+    auto push_str(const char* str) -> void
+    {
+        this->push_str(str::from(str).expect("Failed to convert C-string to str while calling String::push_str"));
+    }
+
+    /**
+     * @brief Splits the string into two at the given byte index
+     * @param at The byte index at which to split
+     * @return A newly allocated String containing bytes [at, len)
+     * @panics If at is not on a UTF-8 code point boundary, or if it is beyond the last code point
+     */
+    auto split_off(std::size_t at) -> String
+    {
+        if (at >= this->m_len)
+        {
+            panic("Split index out of bounds");
+        }
+
+        // Verify that 'at' is on a UTF-8 code point boundary
+        if (!is_valid_utf8(reinterpret_cast<const char*>(this->m_alloc_and_data.second), at) ||
+            !is_valid_utf8(reinterpret_cast<const char*>(this->m_alloc_and_data.second + at), this->m_len - at))
+        {
+            panic("Split index not on UTF-8 code point boundary");
+        }
+
+        // Create new string with the second part
+        String result(this->m_alloc_and_data.first(), nullptr, 0, 0);
+        result.reserve(this->m_len - at);
+
+        // Copy the bytes [at, len) to the new string
+        std::copy(this->m_alloc_and_data.second + at,
+                 this->m_alloc_and_data.second + this->m_len,
+                 result.m_alloc_and_data.second);
+        result.m_len = this->m_len - at;
+        // Add null terminator to the new string
+        result.m_alloc_and_data.second[result.m_len] = std::byte{0};
+
+        // Update this string's length and add null terminator
+        this->m_len = at;
+        this->m_alloc_and_data.second[this->m_len] = std::byte{0};
+
+        return result;
+    }
+
+    /**
+     * @brief Converts the String to a std::string
+     * @return A std::string containing the String's contents
+     */
+    [[nodiscard]] auto to_std_string() const -> std::string
+    {
+        return std::string(std::bit_cast<const char*>(this->m_alloc_and_data.second), this->m_len);
     }
 
     /**
      * @brief Shortens this String to the specified length.
      * @details If new_len is greater than or equal to the string's current length, this has no effect.
      *          Note that this method has no effect on the allocated capacity of the string
-     * @panics Panics if new_len does not lie on a char boundary.
      * @param new_len The new length of the string
+     * @panics Panics if new_len does not lie on a char boundary.
      */
     auto truncate(std::size_t new_len) -> void
     {
@@ -657,7 +795,7 @@ public:
             return;
         }
 
-        if (!basic_str<false>::is_valid_utf8(this->m_alloc_and_data.second, new_len))
+        if (!is_valid_utf8(this->m_alloc_and_data.second, new_len))
         {
             panic("Invalid UTF-8 sequence");
         }
@@ -668,14 +806,14 @@ public:
 
 //operators
 public:
-    auto operator->() noexcept -> str_mut
+    [[nodiscard]] auto operator->() noexcept -> StrProxy
     {
-        return str_mut(this->m_alloc_and_data.second, this->m_len);
+        return StrProxy(str::from_bytes_unchecked(this->m_alloc_and_data.second, this->m_len));
     }
 
-    auto operator->() const noexcept -> str
+    [[nodiscard]] auto operator->() const noexcept -> StrProxy
     {
-        return str(this->m_alloc_and_data.second, this->m_len);
+        return StrProxy(str::from_bytes_unchecked(this->m_alloc_and_data.second, this->m_len));
     }
 
     /**
@@ -683,9 +821,18 @@ public:
      * @param str The str to append
      * @return A reference to this String
      */
-    template<typename S>
-        requires (std::is_same_v<S, str> || std::is_same_v<S, const str_mut>)
-    auto operator+=(const S& str) -> String&
+    auto operator+=(const str& str) -> String&
+    {
+        this->push_str(str);
+        return *this;
+    }
+
+    /**
+     * @brief Appends a C-string to this String using the += operator
+     * @param str The C-string to append
+     * @return A reference to this String
+     */
+    auto operator+=(const char* str) -> String&
     {
         this->push_str(str);
         return *this;
@@ -718,24 +865,24 @@ public:
     }
 };
 
-template<bool Const, typename Alloc>
-[[nodiscard]] constexpr auto operator==(const String<Alloc>& lhs, const basic_str<Const>& rhs) noexcept -> bool
+template<typename Alloc>
+[[nodiscard]] constexpr auto operator==(const String<Alloc>& lhs, const str& rhs) noexcept -> bool
 {
-    if (lhs.len() != rhs.len())
+    if (lhs.size() != rhs.size())
     {
         return false;
     }
-    return std::memcmp(lhs.data(), rhs.data(), lhs.len()) == 0;
+    return std::memcmp(lhs.data(), rhs.data(), lhs.size()) == 0;
 }
 
-template<bool Const, typename Alloc>
-    [[nodiscard]] constexpr auto operator==(const basic_str<Const>& lhs, const String<Alloc>& rhs) noexcept -> bool
+template<typename Alloc>
+    [[nodiscard]] constexpr auto operator==(const str& lhs, const String<Alloc>& rhs) noexcept -> bool
 {
-    if (lhs.len() != rhs.len())
+    if (lhs.size() != rhs.size())
     {
         return false;
     }
-    return std::memcmp(lhs.data(), rhs.data(), lhs.len()) == 0;
+    return std::memcmp(lhs.data(), rhs.data(), lhs.size()) == 0;
 }
 
 }

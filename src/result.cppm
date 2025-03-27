@@ -152,6 +152,36 @@ struct Result : std::variant<T, E>
 
     /**
      * Returns reference if Ok.
+     * Panics if Err with the given message.
+     */
+    template<typename Self>
+    auto expect(this Self&& self, std::string_view msg) noexcept -> auto&&
+    {
+        if (self.is_ok())
+        {
+            return std::get<0>(self);
+        }
+
+        panic(msg);
+    }
+
+    /**
+     * Returns Err reference.
+     * Panics if Ok with the given message.
+     */
+    template<typename Self>
+    auto expect_err(this Self&& self, std::string_view msg) noexcept -> auto&&
+    {
+        if (self.is_err())
+        {
+            return std::get<1>(self);
+        }
+
+        panic(msg);
+    }
+
+    /**
+     * Returns reference if Ok.
      * Panics if Err.
      */
     template<typename Self>

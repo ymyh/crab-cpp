@@ -1,7 +1,7 @@
 export module crab_cpp:option;
 
-import :panic;
 import std;
+import :panic;
 
 export namespace crab_cpp
 {
