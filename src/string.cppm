@@ -238,6 +238,74 @@ struct str
     using pointer = const std::byte*;
 
 private:
+    // struct Lines
+    // {
+    //     struct LinesIter
+    //     {
+    //         using iterator_category = std::forward_iterator_tag;
+    //         using value_type = str;
+    //         using difference_type = std::ptrdiff_t;
+    //         using pointer = str*;
+    //         using reference = str&;
+
+    //         const str& s;
+    //         str line;
+
+    //         constexpr explicit LinesIter(const str& s = str()) noexcept : s(s), line() {}
+
+    //         // Dereference operator
+    //         [[nodiscard]] constexpr auto operator*() const noexcept -> str
+    //         {
+    //             return this->line;
+    //         }
+
+    //         // Arrow operator
+    //         [[nodiscard]] constexpr auto operator->() const noexcept -> const str*
+    //         {
+    //             return &this->line;
+    //         }
+
+    //         // Pre-increment operator
+    //         constexpr auto operator++() noexcept -> LinesIter&
+    //         {
+    //             // Implement logic to move to the next line
+    //             return *this;
+    //         }
+
+    //         // Post-increment operator
+    //         constexpr auto operator++(int) noexcept -> LinesIter
+    //         {
+    //             LinesIter temp = *this;
+    //             ++(*this);
+    //             return temp;
+    //         }
+
+    //         // Equality operator
+    //         [[nodiscard]] constexpr auto operator==(const LinesIter& other) const noexcept -> bool
+    //         {
+    //             return this->line.m_data == other.line.m_data;
+    //         }
+    //     };
+
+    // public:
+    //     const str& s;
+
+    // public:
+    //     constexpr explicit Lines(const str& s) : s(s) {}
+
+    // public:
+    //     [[nodiscard]] constexpr auto begin() const noexcept -> Option<LinesIter>
+    //     {
+    //         return LinesIter(this->s);
+    //     }
+
+    //     [[nodiscard]] constexpr auto end() const noexcept -> Option<LinesIter>
+    //     {
+    //         return None{};
+    //     }
+    // };
+
+private:
     pointer m_data;  // Pointer to string data
     std::size_t m_len;   // String length in bytes
 
@@ -316,11 +384,29 @@ public:
     }
 
     /**
-     * @brief Returns the length of the string in bytes
+     * @brief Checks if this string contains the given pattern
+     * @param pattern The pattern to search for
+     * @return true if this string contains the pattern
      */
-    [[nodiscard]] constexpr auto size() const noexcept -> std::size_t
+    [[nodiscard]] constexpr auto contains(const str& pattern) const noexcept -> bool
     {
-        return this->m_len;
+        if (pattern.m_len > this->m_len)
+        {
+            return false;
+        }
+
+        if (pattern.m_len == 0)
+        {
+            return true;
+        }
+
+        // Create spans for the current string and pattern
+        std::span<const std::byte> haystack(this->m_data, this->m_len);
+        std::span<const std::byte> needle(pattern.m_data, pattern.m_len);
+
+        // Use std::ranges::search to find the pattern
+        auto result = std::ranges::search(haystack, needle);
+        return !result.empty();
     }
 
     /**
@@ -337,6 +423,14 @@ public:
     [[nodiscard]] constexpr auto empty() const noexcept -> bool
     {
         return this->m_len == 0;
+    }
+
+    /**
+     * @brief Returns the length of the string in bytes
+     */
+    [[nodiscard]] constexpr auto size() const noexcept -> std::size_t
+    {
+        return this->m_len;
     }
 
     /**
@@ -392,6 +486,34 @@ public:
         return std::string(reinterpret_cast<const char*>(this->m_data), this->m_len);
     }
 
+    /**
+     * @brief Returns the byte index of the first character that matches the pattern
+     * @param pattern The pattern to search for
+     * @return Option containing the byte index of the first match, or None if not found
+     */
+    [[nodiscard]] constexpr auto find(const str& pattern) const noexcept -> Option<std::size_t>
+    {
+        if (pattern.m_len > this->m_len || pattern.m_len == 0)
+        {
+            return None{};
+        }
+
+        // Create spans for the current string and pattern
+        std::span<const std::byte> haystack(this->m_data, this->m_len);
+        std::span<const std::byte> needle(pattern.m_data, pattern.m_len);
+
+        // Use std::ranges::search to find the pattern
+        auto result = std::ranges::search(haystack, needle);
+
+        if (result.empty())
+        {
+            return None{};
+        }
+
+        // Calculate the byte offset from the start of the string
+        return size_t(std::distance(haystack.begin(), result.begin()));
+    }
+
 // operators
 public:
     [[nodiscard]] constexpr auto operator<=>(const str& other) const noexcept -> std::strong_ordering
@@ -421,7 +543,7 @@ public:
 };
 
 /**
- * @brief A UTF-8–encoded, growable string with custom allocator support
+ * @brief A UTF-8–encoded, null-terminated, growable string with custom allocator support
  * @tparam Alloc The allocator type to use for memory management
  */
 template<typename Alloc = std::allocator<std::byte>>
@@ -650,8 +772,8 @@ public:
         if (this->m_len > 0)
         {
             std::copy(this->m_alloc_and_data.second,
-                     this->m_alloc_and_data.second + this->m_len,
-                     new_data);
+                    this->m_alloc_and_data.second + this->m_len,
+                    new_data);
         }
         // Add null terminator
         new_data[this->m_len] = std::byte{0};
@@ -804,6 +926,40 @@ public:
         this->m_alloc_and_data.second[this->m_len] = '\0';
     }
 
+    /**
+     * @brief Removes the last character from the string buffer and returns it
+     * @return Option containing the removed character, or None if the string is empty
+     */
+    [[nodiscard]] auto pop() noexcept -> Option<Char>
+    {
+        if (this->m_len == 0)
+        {
+            return None{};
+        }
+
+        // Find the start of the last UTF-8 sequence by scanning backwards
+        std::size_t start = this->m_len - 1;
+        while (start > 0 && (this->m_alloc_and_data.second[start] & std::byte{0xC0}) == std::byte{0x80})
+        {
+            start -= 1;
+        }
+
+        // Decode the UTF-8 sequence
+        utf8proc_int32_t codepoint;
+        utf8proc_iterate(
+            reinterpret_cast<const utf8proc_uint8_t*>(this->m_alloc_and_data.second + start),
+            this->m_len - start,
+            &codepoint
+        );
+
+        // Update string length
+        this->m_len = start;
+        // Add null terminator at new end
+        this->m_alloc_and_data.second[this->m_len] = std::byte{0};
+
+        return Char(static_cast<std::uint32_t>(codepoint));
+    }
+
 //operators
 public:
     [[nodiscard]] auto operator->() noexcept -> StrProxy
@@ -876,7 +1032,7 @@ template<typename Alloc>
 }
 
 template<typename Alloc>
-    [[nodiscard]] constexpr auto operator==(const str& lhs, const String<Alloc>& rhs) noexcept -> bool
+[[nodiscard]] constexpr auto operator==(const str& lhs, const String<Alloc>& rhs) noexcept -> bool
 {
     if (lhs.size() != rhs.size())
     {

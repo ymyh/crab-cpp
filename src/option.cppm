@@ -233,6 +233,50 @@ struct Option<T> : std::variant<None, T>
 
         return None{};
     }
+
+    auto operator->() -> T*
+    {
+        if (this->is_some())
+        {
+            return &std::get<1>(*this);
+        }
+
+        panic("Calling operator-> on a None value");
+    }
+
+    auto operator->() const -> const T*
+    {
+        if (this->is_some())
+        {
+            return &std::get<1>(*this);
+        }
+
+        panic("Calling operator-> on a None value");
+    }
+
+    template<typename... Args>
+        requires requires(T t, Args... args) { { t(args...) }; }
+    auto operator()(Args&&... args) const -> Option<decltype(std::declval<T>()(std::declval<Args>()...))>
+    {
+        if (this->is_some())
+        {
+            return std::get<1>(*this)(std::forward<Args>(args)...);
+        }
+
+        return None{};
+    }
+
+    template<typename Index>
+        requires requires(T t, Index i) { { t[i] }; }
+    auto operator[](Index&& index) -> Option<decltype(std::declval<T>()[std::declval<Index>()])>
+    {
+        if (this->is_some())
+        {
+            return std::get<1>(*this)[std::forward<Index>(index)];
+        }
+
+        return None{};
+    }
 };
 
 /**
@@ -458,9 +502,129 @@ public:
 
         return None{};
     }
+
+    template<size_t Idx>
+        requires std::is_lvalue_reference_v<T>
+    constexpr auto get() -> T&
+    {
+        if (this->is_some() && Idx == 1)
+        {
+            return this->unwrap();
+        }
+
+        panic("Calling std::get on a None value");
+    }
 };
 
 template<typename T>
 Option(T) -> Option<T>;
+
+// 加法操作符
+template<typename T1, typename T2>
+    requires requires(T1 a, T2 b) { { a + b }; }
+constexpr auto operator+(const Option<T1>& lhs, const Option<T2>& rhs)
+    -> Option<decltype(std::declval<T1>() + std::declval<T2>())>
+{
+    if (lhs.is_some() && rhs.is_some())
+    {
+        return std::get<1>(lhs) + std::get<1>(rhs);
+    }
+    return None{};
+}
+
+// 减法操作符
+template<typename T1, typename T2>
+    requires requires(T1 a, T2 b) { { a - b }; }
+constexpr auto operator-(const Option<T1>& lhs, const Option<T2>& rhs)
+    -> Option<decltype(std::declval<T1>() - std::declval<T2>())>
+{
+    if (lhs.is_some() && rhs.is_some())
+    {
+        return std::get<1>(lhs) - std::get<1>(rhs);
+    }
+    return None{};
+}
+
+// 乘法操作符
+template<typename T1, typename T2>
+    requires requires(T1 a, T2 b) { { a * b }; }
+constexpr auto operator*(const Option<T1>& lhs, const Option<T2>& rhs)
+    -> Option<decltype(std::declval<T1>() * std::declval<T2>())>
+{
+    if (lhs.is_some() && rhs.is_some())
+    {
+        return std::get<1>(lhs) * std::get<1>(rhs);
+    }
+    return None{};
+}
+
+// 除法操作符
+template<typename T1, typename T2>
+    requires requires(T1 a, T2 b) { { a / b }; }
+constexpr auto operator/(const Option<T1>& lhs, const Option<T2>& rhs)
+    -> Option<decltype(std::declval<T1>() / std::declval<T2>())>
+{
+    if (lhs.is_some() && rhs.is_some())
+    {
+        return std::get<1>(lhs) / std::get<1>(rhs);
+    }
+    return None{};
+}
+
+// 位与操作符
+template<typename T1, typename T2>
+    requires requires(T1 a, T2 b) { { a & b }; }
+constexpr auto operator&(const Option<T1>& lhs, const Option<T2>& rhs)
+    -> Option<decltype(std::declval<T1>() & std::declval<T2>())>
+{
+    if (lhs.is_some() && rhs.is_some())
+    {
+        return std::get<1>(lhs) & std::get<1>(rhs);
+    }
+    return None{};
+}
+
+// 位或操作符
+template<typename T1, typename T2>
+    requires requires(T1 a, T2 b) { { a | b }; }
+constexpr auto operator|(const Option<T1>& lhs, const Option<T2>& rhs)
+    -> Option<decltype(std::declval<T1>() | std::declval<T2>())>
+{
+    if (lhs.is_some() && rhs.is_some())
+    {
+        return std::get<1>(lhs) | std::get<1>(rhs);
+    }
+    return None{};
+}
+
+// 位异或操作符
+template<typename T1, typename T2>
+    requires requires(T1 a, T2 b) { { a ^ b }; }
+constexpr auto operator^(const Option<T1>& lhs, const Option<T2>& rhs)
+    -> Option<decltype(std::declval<T1>() ^ std::declval<T2>())>
+{
+    if (lhs.is_some() && rhs.is_some())
+    {
+        return std::get<1>(lhs) ^ std::get<1>(rhs);
+    }
+    return None{};
+}
+
+}
+
+namespace std
+{
+
+// export template<size_t Idx, typename T>
+//     requires std::is_lvalue_reference_v<T>
+// constexpr auto get(const crab_cpp::Option<T>& opt) -> T&
+// {
+//     if (opt.is_some() && Idx == 1)
+//     {
+//         return opt.unwrap();
+//     }
+
+//     crab_cpp::panic("Calling std::get on a None value");
+// }
 
 }
