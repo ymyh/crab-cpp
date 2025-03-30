@@ -72,84 +72,6 @@ struct Option<T> : std::variant<None, T>
     }
 
     /**
-     * Takes the value out of the option, leaving a None in its place.
-     */
-    auto take() noexcept -> T
-    {
-        return this->expect_take("Calling Option<T>::take() on a None value");
-    }
-
-    /**
-     * Takes the value out of the option, but only if the predicate evaluates to true on a mutable reference to the value.
-     * In other words, replaces self with None if the predicate returns true. This method operates similar to Option::take but conditional.
-     */
-    template<typename P>
-        requires (std::invocable<P, T&> && std::is_same_v<std::invoke_result_t<P, T&>, bool>)
-    auto take_if(P&& pred) -> Option<T>
-    {
-        if (this->is_some() && std::invoke(pred, std::get<1>(*this)))
-        {
-            T tmp = std::move(std::get<1>(*this));
-            return tmp;
-        }
-
-        return None{};
-    }
-
-    /**
-     * If value present, moves the contained value, left None behind.
-     * If no value present, returns default value.
-     */
-    template<typename Self>
-        requires std::is_default_constructible_v<T>
-    [[nodiscard]] auto take_or_default(this Self&& self) noexcept -> T
-    {
-        if (self.index() == 1)
-        {
-            T tmp = std::move(std::get<1>(self));
-            self = None{};
-
-            return tmp;
-        }
-
-        return T{};
-    }
-
-    /**
-     * If value present, moves the contained value, left None behind.
-     * If no value present, the result of calling to f is returned.
-     */
-    template<typename F>
-        requires requires(F f)
-        {
-            { f() } -> std::same_as<T>;
-        }
-    [[nodiscard]] auto take_or_else(F&& f) -> T
-    {
-        if (this->index() == 1)
-        {
-            T tmp = std::move(std::get<1>(*this));
-            *this = None{};
-
-            return tmp;
-        }
-
-        return f();
-    }
-
-    /**
-     * Returns the contained Some value reference.
-     * Because this function may panic, its use is generally discouraged. Panics are meant for unrecoverable errors, and abort the entire program.
-     * Instead, prefer to use pattern matching and handle the None case explicitly.
-     * Panics if the self value equals None.
-     */
-    template<typename Self>
-    [[nodiscard]] auto unwrap(this Self&& self) noexcept -> decltype(auto)
-    {
-        return self.expect("Calling Option<T>::unwrap() on a None value");
-    }
-
-    /**
      * Returns true if the option is a None value.
      */
     [[nodiscard]] auto is_none() const noexcept -> bool
@@ -234,11 +156,95 @@ struct Option<T> : std::variant<None, T>
         return None{};
     }
 
+    /**
+     * Takes the value out of the option, leaving a None in its place.
+     */
+    auto take() noexcept -> T
+    {
+        return this->expect_take("Calling Option<T>::take() on a None value");
+    }
+
+    /**
+     * Takes the value out of the option, but only if the predicate evaluates to true on a mutable reference to the value.
+     * In other words, replaces self with None if the predicate returns true. This method operates similar to Option::take but conditional.
+     */
+    template<typename P>
+        requires (std::invocable<P, T&> && std::is_same_v<std::invoke_result_t<P, T&>, bool>)
+    auto take_if(P&& pred) -> Option<T>
+    {
+        if (this->is_some() && std::invoke(pred, std::get<1>(*this)))
+        {
+            T tmp = std::move(std::get<1>(*this));
+            return tmp;
+        }
+
+        return None{};
+    }
+
+    /**
+     * If value present, moves the contained value, left None behind.
+     * If no value present, returns default value.
+     */
+    template<typename Self>
+        requires std::is_default_constructible_v<T>
+    [[nodiscard]] auto take_or_default(this Self&& self) noexcept -> T
+    {
+        if (self.index() == 1)
+        {
+            T tmp = std::move(std::get<1>(self));
+            self = None{};
+
+            return tmp;
+        }
+
+        return T{};
+    }
+
+    /**
+     * If value present, moves the contained value, left None behind.
+     * If no value present, the result of calling to f is returned.
+     */
+    template<typename F>
+        requires requires(F f)
+        {
+            { f() } -> std::same_as<T>;
+        }
+    [[nodiscard]] auto take_or_else(F&& f) -> T
+    {
+        if (this->index() == 1)
+        {
+            T tmp = std::move(std::get<1>(*this));
+            *this = None{};
+
+            return tmp;
+        }
+
+        return f();
+    }
+
+    /**
+     * Returns the contained Some value reference.
+     * Because this function may panic, its use is generally discouraged. Panics are meant for unrecoverable errors, and abort the entire program.
+     * Instead, prefer to use pattern matching and handle the None case explicitly.
+     * Panics if the self value equals None.
+     */
+    template<typename Self>
+    [[nodiscard]] auto unwrap(this Self&& self) noexcept -> decltype(auto)
+    {
+        return self.expect("Calling Option<T>::unwrap() on a None value");
+    }
+
+    template<typename Self>
+    [[nodiscard]] auto unwrap_unchecked(this Self&& self) noexcept -> decltype(auto)
+    {
+        return (std::get<1>(self));
+    }
+
     auto operator->() -> T*
     {
         if (this->is_some())
         {
-            return &std::get<1>(*this);
+            return std::addressof(std::get<1>(*this));
         }
 
         panic("Calling operator-> on a None value");
@@ -248,7 +254,7 @@ struct Option<T> : std::variant<None, T>
     {
         if (this->is_some())
         {
-            return &std::get<1>(*this);
+            return std::addressof(std::get<1>(*this));
         }
 
         panic("Calling operator-> on a None value");
@@ -339,15 +345,6 @@ public:
     }
 
     /**
-     * Returns pointer if pointer is not null, otherwise panics.
-     */
-    template<typename Self>
-    auto unwrap(this Self&& self) noexcept -> decltype(auto)
-    {
-        return self.expect("Calling Option<T>::unwrap() on a None value");
-    }
-
-    /**
      * Calls a function with a reference to the contained value if Some.
      * Returns the original option.
      */
@@ -396,6 +393,21 @@ public:
 
         return None{};
     }
+
+    /**
+     * Returns pointer if pointer is not null, otherwise panics.
+     */
+    template<typename Self>
+    auto unwrap(this Self&& self) noexcept -> decltype(auto)
+    {
+        return self.expect("Calling Option<T>::unwrap() on a None value");
+    }
+
+    template<typename Self>
+    auto unwrap_unchecked(this Self&& self) noexcept -> decltype(auto)
+    {
+        return self.ptr;
+    }
 };
 
 /**
@@ -440,17 +452,6 @@ public:
     auto is_some() const noexcept -> bool
     {
        return !this->is_none();
-    }
-
-    template<typename Self>
-    auto unwrap(this Self&& self) noexcept -> decltype(auto)
-    {
-        if (self.is_some())
-        {
-            return (*self.ptr);
-        }
-
-        panic("Calling Option<T>::unwrap() on a None value");
     }
 
     /**
@@ -503,23 +504,27 @@ public:
         return None{};
     }
 
-    template<size_t Idx>
-        requires std::is_lvalue_reference_v<T>
-    constexpr auto get() -> T&
+    template<typename Self>
+    constexpr auto unwrap(this Self&& self) noexcept -> decltype(auto)
     {
-        if (this->is_some() && Idx == 1)
+        if (self.is_some())
         {
-            return this->unwrap();
+            return (*self.ptr);
         }
 
-        panic("Calling std::get on a None value");
+        panic("Calling Option<T>::unwrap() on a None value");
+    }
+
+    template<typename Self>
+    constexpr auto unwrap_unchecked(this Self&& self) noexcept -> decltype(auto)
+    {
+        return (*self.ptr);
     }
 };
 
 template<typename T>
 Option(T) -> Option<T>;
 
-// 加法操作符
 template<typename T1, typename T2>
     requires requires(T1 a, T2 b) { { a + b }; }
 constexpr auto operator+(const Option<T1>& lhs, const Option<T2>& rhs)
@@ -527,12 +532,11 @@ constexpr auto operator+(const Option<T1>& lhs, const Option<T2>& rhs)
 {
     if (lhs.is_some() && rhs.is_some())
     {
-        return std::get<1>(lhs) + std::get<1>(rhs);
+        return lhs.unwrap_unchecked() + rhs.unwrap_unchecked();
     }
     return None{};
 }
 
-// 减法操作符
 template<typename T1, typename T2>
     requires requires(T1 a, T2 b) { { a - b }; }
 constexpr auto operator-(const Option<T1>& lhs, const Option<T2>& rhs)
@@ -540,12 +544,11 @@ constexpr auto operator-(const Option<T1>& lhs, const Option<T2>& rhs)
 {
     if (lhs.is_some() && rhs.is_some())
     {
-        return std::get<1>(lhs) - std::get<1>(rhs);
+        return lhs.unwrap_unchecked() - rhs.unwrap_unchecked();
     }
     return None{};
 }
 
-// 乘法操作符
 template<typename T1, typename T2>
     requires requires(T1 a, T2 b) { { a * b }; }
 constexpr auto operator*(const Option<T1>& lhs, const Option<T2>& rhs)
@@ -553,12 +556,11 @@ constexpr auto operator*(const Option<T1>& lhs, const Option<T2>& rhs)
 {
     if (lhs.is_some() && rhs.is_some())
     {
-        return std::get<1>(lhs) * std::get<1>(rhs);
+        return lhs.unwrap_unchecked() * rhs.unwrap_unchecked();
     }
     return None{};
 }
 
-// 除法操作符
 template<typename T1, typename T2>
     requires requires(T1 a, T2 b) { { a / b }; }
 constexpr auto operator/(const Option<T1>& lhs, const Option<T2>& rhs)
@@ -566,12 +568,11 @@ constexpr auto operator/(const Option<T1>& lhs, const Option<T2>& rhs)
 {
     if (lhs.is_some() && rhs.is_some())
     {
-        return std::get<1>(lhs) / std::get<1>(rhs);
+        return lhs.unwrap_unchecked() / rhs.unwrap_unchecked();
     }
     return None{};
 }
 
-// 位与操作符
 template<typename T1, typename T2>
     requires requires(T1 a, T2 b) { { a & b }; }
 constexpr auto operator&(const Option<T1>& lhs, const Option<T2>& rhs)
@@ -579,12 +580,12 @@ constexpr auto operator&(const Option<T1>& lhs, const Option<T2>& rhs)
 {
     if (lhs.is_some() && rhs.is_some())
     {
-        return std::get<1>(lhs) & std::get<1>(rhs);
+        return lhs.unwrap_unchecked() & rhs.unwrap_unchecked();
     }
     return None{};
 }
 
-// 位或操作符
+
 template<typename T1, typename T2>
     requires requires(T1 a, T2 b) { { a | b }; }
 constexpr auto operator|(const Option<T1>& lhs, const Option<T2>& rhs)
@@ -592,12 +593,11 @@ constexpr auto operator|(const Option<T1>& lhs, const Option<T2>& rhs)
 {
     if (lhs.is_some() && rhs.is_some())
     {
-        return std::get<1>(lhs) | std::get<1>(rhs);
+        return lhs.unwrap_unchecked() | rhs.unwrap_unchecked();
     }
     return None{};
 }
 
-// 位异或操作符
 template<typename T1, typename T2>
     requires requires(T1 a, T2 b) { { a ^ b }; }
 constexpr auto operator^(const Option<T1>& lhs, const Option<T2>& rhs)
@@ -605,26 +605,9 @@ constexpr auto operator^(const Option<T1>& lhs, const Option<T2>& rhs)
 {
     if (lhs.is_some() && rhs.is_some())
     {
-        return std::get<1>(lhs) ^ std::get<1>(rhs);
+        return lhs.unwrap_unchecked() ^ rhs.unwrap_unchecked();
     }
     return None{};
 }
-
-}
-
-namespace std
-{
-
-// export template<size_t Idx, typename T>
-//     requires std::is_lvalue_reference_v<T>
-// constexpr auto get(const crab_cpp::Option<T>& opt) -> T&
-// {
-//     if (opt.is_some() && Idx == 1)
-//     {
-//         return opt.unwrap();
-//     }
-
-//     crab_cpp::panic("Calling std::get on a None value");
-// }
 
 }
