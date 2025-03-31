@@ -1,9 +1,12 @@
 module;
 
-#include <stddef.h>
 #include "include/utf8proc.h"
 
 export module crab_cpp:string;
+
+#if defined(_MSC_VER) && defined(__clang__)
+#define offsetof __builtin_offsetof
+#endif
 
 import :panic;
 import :option;
@@ -46,8 +49,16 @@ struct compressed_pair<T1, T2, false>
 
     [[nodiscard]] constexpr static auto offset_of_second() noexcept -> size_t
     {
-        return __builtin_offsetof(compressed_pair<T1, T2, false>, second);
+        return offsetof(compressed_pair<T1, T2, false>, second);
     }
+};
+
+struct plain_str
+{
+    const std::byte* data;
+    size_t len;
+
+    [[nodiscard]] constexpr auto operator<=>(const plain_str& other) const noexcept -> std::strong_ordering = default;
 };
 
 export namespace crab_cpp
@@ -238,76 +249,8 @@ struct str
     using pointer = const std::byte*;
 
 private:
-    // struct Lines
-    // {
-    //     struct LinesIter
-    //     {
-    //         using iterator_category = std::forward_iterator_tag;
-    //         using value_type = str;
-    //         using difference_type = std::ptrdiff_t;
-    //         using pointer = str*;
-    //         using reference = str&;
-
-    //         const str& s;
-    //         str line;
-
-    //         constexpr explicit LinesIter(const str& s = str()) noexcept : s(s), line() {}
-
-    //         // Dereference operator
-    //         [[nodiscard]] constexpr auto operator*() const noexcept -> str
-    //         {
-    //             return this->line;
-    //         }
-
-    //         // Arrow operator
-    //         [[nodiscard]] constexpr auto operator->() const noexcept -> const str*
-    //         {
-    //             return &this->line;
-    //         }
-
-    //         // Pre-increment operator
-    //         constexpr auto operator++() noexcept -> LinesIter&
-    //         {
-    //             // Implement logic to move to the next line
-    //             return *this;
-    //         }
-
-    //         // Post-increment operator
-    //         constexpr auto operator++(int) noexcept -> LinesIter
-    //         {
-    //             LinesIter temp = *this;
-    //             ++(*this);
-    //             return temp;
-    //         }
-
-    //         // Equality operator
-    //         [[nodiscard]] constexpr auto operator==(const LinesIter& other) const noexcept -> bool
-    //         {
-    //             return this->line.m_data == other.line.m_data;
-    //         }
-    //     };
-
-    // public:
-    //     const str& s;
-
-    // public:
-    //     constexpr explicit Lines(const str& s) : s(s) {}
-
-    // public:
-    //     [[nodiscard]] constexpr auto begin() const noexcept -> Option<LinesIter>
-    //     {
-    //         return LinesIter(this->s);
-    //     }
-
-    //     [[nodiscard]] constexpr auto end() const noexcept -> Option<LinesIter>
-    //     {
-    //         return None{};
-    //     }
-    // };
-
-private:
-    pointer m_data;  // Pointer to string data
-    std::size_t m_len;   // String length in bytes
+    pointer m_data;
+    std::size_t m_len;
 
     /**
      * @brief Private constructor for internal use
@@ -513,6 +456,155 @@ public:
         // Calculate the byte offset from the start of the string
         return size_t(std::distance(haystack.begin(), result.begin()));
     }
+
+// iterators
+private:
+    struct Lines
+    {
+        struct LinesIter
+        {
+            using iterator_category = std::forward_iterator_tag;
+            using value_type = str;
+            using difference_type = std::ptrdiff_t;
+            using pointer = str*;
+            using reference = str&;
+
+            const str* s = nullptr;
+            plain_str span;
+
+            constexpr explicit LinesIter() noexcept {}
+
+            constexpr explicit LinesIter(const str* s) noexcept : s(s)
+            {
+                if (s != nullptr) {
+                    // Initialize the first line
+                    auto bytes = s->as_bytes();
+                    std::size_t start = 0;
+                    std::size_t pos = 0;
+
+                    // Find the first line ending
+                    while (pos < bytes.size()) {
+                        if (bytes[pos] == std::byte{'\n'}) {
+                            span = plain_str{bytes.data() + start, pos - start};
+                            pos++; // Skip \n
+                            break;
+                        } else if (bytes[pos] == std::byte{'\r'} && pos + 1 < bytes.size() && bytes[pos + 1] == std::byte{'\n'}) {
+                            span = plain_str{bytes.data() + start, pos - start};
+                            pos += 2; // Skip \r\n
+                            break;
+                        }
+                        pos++;
+                    }
+
+                    // If no line ending found, take the whole string
+                    if (pos >= bytes.size()) {
+                        span = plain_str{bytes.data(), bytes.size()};
+                        pos = bytes.size();
+                    }
+
+                    // Store current position for next iteration
+                    span.len = pos - start;
+                }
+            }
+
+            [[nodiscard]] constexpr auto operator*() const noexcept -> const plain_str&
+            {
+                return span;
+            }
+
+            [[nodiscard]] constexpr auto operator->() const noexcept -> const plain_str*
+            {
+                return &span;
+            }
+
+            constexpr auto operator++() noexcept -> LinesIter&
+            {
+                if (s == nullptr)
+                {
+                    return *this;
+                }
+
+                auto bytes = s->as_bytes();
+                std::size_t start = span.data - bytes.data() + span.len;
+
+                // If we're at or past the end, mark as finished
+                if (start >= bytes.size())
+                {
+                    s = nullptr;
+                    span = plain_str{nullptr, 0};
+                    return *this;
+                }
+
+                // Skip the line ending we found in the previous iteration
+                if (bytes[start] == std::byte{'\n'})
+                {
+                    start++;
+                }
+                else if (bytes[start] == std::byte{'\r'} && start + 1 < bytes.size() && bytes[start + 1] == std::byte{'\n'})
+                {
+                    start += 2;
+                }
+
+                // If we're at the end after skipping line ending, mark as finished
+                if (start >= bytes.size())
+                {
+                    s = nullptr;
+                    span = plain_str{nullptr, 0};
+                    return *this;
+                }
+
+                // Find the next line ending
+                std::size_t pos = start;
+                while (pos < bytes.size())
+                {
+                    if (bytes[pos] == std::byte{'\n'})
+                    {
+                        span = plain_str{bytes.data() + start, pos - start};
+                        break;
+                    } else if (bytes[pos] == std::byte{'\r'} && pos + 1 < bytes.size() && bytes[pos + 1] == std::byte{'\n'})
+                    {
+                        span = plain_str{bytes.data() + start, pos - start};
+                        break;
+                    }
+                    pos++;
+                }
+
+                // If no line ending found, take the rest of the string
+                if (pos >= bytes.size())
+                {
+                    span = plain_str{bytes.data() + start, bytes.size() - start};
+                }
+
+                return *this;
+            }
+
+            constexpr auto operator++(int) noexcept -> LinesIter
+            {
+                LinesIter temp = *this;
+                ++(*this);
+                return temp;
+            }
+
+            [[nodiscard]] constexpr auto operator<=>(const LinesIter& other) const noexcept -> std::strong_ordering = default;
+        };
+
+    public:
+        const str& s;
+
+    public:
+        constexpr explicit Lines(const str& s) : s(s) {}
+
+    public:
+        [[nodiscard]] constexpr auto begin() const noexcept -> LinesIter
+        {
+            return LinesIter(&this->s);
+        }
+
+        [[nodiscard]] constexpr auto end() const noexcept -> LinesIter
+        {
+            return LinesIter(nullptr);
+        }
+    };
 
 // operators
 public:

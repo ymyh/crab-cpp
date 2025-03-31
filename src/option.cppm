@@ -239,50 +239,6 @@ struct Option<T> : std::variant<None, T>
     {
         return (std::get<1>(self));
     }
-
-    auto operator->() -> T*
-    {
-        if (this->is_some())
-        {
-            return std::addressof(std::get<1>(*this));
-        }
-
-        panic("Calling operator-> on a None value");
-    }
-
-    auto operator->() const -> const T*
-    {
-        if (this->is_some())
-        {
-            return std::addressof(std::get<1>(*this));
-        }
-
-        panic("Calling operator-> on a None value");
-    }
-
-    template<typename... Args>
-        requires requires(T t, Args... args) { { t(args...) }; }
-    auto operator()(Args&&... args) const -> Option<decltype(std::declval<T>()(std::declval<Args>()...))>
-    {
-        if (this->is_some())
-        {
-            return std::get<1>(*this)(std::forward<Args>(args)...);
-        }
-
-        return None{};
-    }
-
-    template<typename Index>
-        requires requires(T t, Index i) { { t[i] }; }
-    auto operator[](Index&& index) -> Option<decltype(std::declval<T>()[std::declval<Index>()])>
-    {
-        if (this->is_some())
-        {
-            return std::get<1>(*this)[std::forward<Index>(index)];
-        }
-
-        return None{};
-    }
 };
 
 /**
