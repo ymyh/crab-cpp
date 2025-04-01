@@ -606,6 +606,154 @@ private:
         }
     };
 
+    struct Split
+    {
+        struct SplitIter
+        {
+            using iterator_category = std::forward_iterator_tag;
+            using value_type = plain_str;
+            using difference_type = std::ptrdiff_t;
+            using pointer = plain_str*;
+            using reference = plain_str&;
+
+            const str* s = nullptr;
+            const str* pattern;
+            plain_str span;
+
+            constexpr explicit SplitIter() noexcept {}
+
+            constexpr SplitIter(const str* s, const str* pattern) noexcept : s(s), pattern(pattern)
+            {
+                if (s != nullptr)
+                {
+                    auto bytes = s->as_bytes();
+                    // If pattern is empty, return the entire string
+                    if (pattern->m_len == 0)
+                    {
+                        span = plain_str{bytes.data(), bytes.size()};
+                        return;
+                    }
+
+                    // Find the first split point
+                    std::size_t pos = 0;
+                    while (pos <= bytes.size()) {
+                        // Search for pattern
+                        bool found = false;
+                        if (pos + pattern->m_len <= bytes.size()) {
+                            found = std::memcmp(bytes.data() + pos, pattern->m_data, pattern->m_len) == 0;
+                        }
+
+                        if (found) {
+                            span = plain_str{bytes.data(), pos};
+                            break;
+                        }
+
+                        if (pos == bytes.size()) {
+                            span = plain_str{bytes.data(), pos};
+                            break;
+                        }
+
+                        pos++;
+                    }
+                }
+            }
+
+            [[nodiscard]] constexpr auto operator*() const noexcept -> const plain_str&
+            {
+                return span;
+            }
+
+            [[nodiscard]] constexpr auto operator->() const noexcept -> const plain_str*
+            {
+                return &span;
+            }
+
+            constexpr auto operator++() noexcept -> SplitIter&
+            {
+                if (s == nullptr)
+                {
+                    return *this;
+                }
+
+                auto bytes = s->as_bytes();
+                std::size_t start = span.data - bytes.data() + span.len;
+
+                // If we've reached the end of the string, end iteration
+                if (start >= bytes.size())
+                {
+                    s = nullptr;
+                    span = plain_str{nullptr, 0};
+                    return *this;
+                }
+
+                // Skip the delimiter
+                start += pattern->m_len;
+
+                // If we've reached the end after skipping delimiter, end iteration
+                if (start >= bytes.size())
+                {
+                    // Return empty string as the last element
+                    span = plain_str{bytes.data() + bytes.size(), 0};
+                    return *this;
+                }
+
+                // Find the next split point
+                std::size_t pos = start;
+                while (pos <= bytes.size())
+                {
+                    bool found = false;
+                    if (pos + pattern->m_len <= bytes.size())
+                    {
+                        found = std::memcmp(bytes.data() + pos, pattern->m_data, pattern->m_len) == 0;
+                    }
+
+                    if (found)
+                    {
+                        span = plain_str{bytes.data() + start, pos - start};
+                        break;
+                    }
+
+                    if (pos == bytes.size())
+                    {
+                        span = plain_str{bytes.data() + start, pos - start};
+                        break;
+                    }
+
+                    pos++;
+                }
+
+                return *this;
+            }
+
+            constexpr auto operator++(int) noexcept -> SplitIter
+            {
+                SplitIter temp = *this;
+                ++(*this);
+                return temp;
+            }
+
+            [[nodiscard]] constexpr auto operator<=>(const SplitIter& other) const noexcept -> std::strong_ordering = default;
+        };
+
+    public:
+        const str& s;
+        const str& pattern;
+
+    public:
+        constexpr Split(const str& s, const str& pattern) : s(s), pattern(pattern) {}
+
+    public:
+        [[nodiscard]] constexpr auto begin() const noexcept -> SplitIter
+        {
+            return SplitIter(&this->s, &this->pattern);
+        }
+
+        [[nodiscard]] constexpr auto end() const noexcept -> SplitIter
+        {
+            return SplitIter(nullptr, nullptr);
+        }
+    };
+
 // operators
 public:
     [[nodiscard]] constexpr auto operator<=>(const str& other) const noexcept -> std::strong_ordering
@@ -632,8 +780,40 @@ public:
         }
         return std::memcmp(this->m_data, other.m_data, this->m_len) == 0;
     }
+
+    /**
+     * @brief Returns an iterator over the lines of this string
+     * @return A Lines iterator that yields each line in the string
+     */
+    [[nodiscard]] constexpr auto lines() const noexcept -> Lines
+    {
+        return Lines(*this);
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by the given pattern
+     * @param pattern The pattern to split on
+     * @return A Split iterator that yields each part of the split string
+     */
+    [[nodiscard]] constexpr auto split(const str& pattern) const noexcept -> Split
+    {
+        return Split(*this, pattern);
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by the given pattern
+     * @param pattern The pattern to split on
+     * @return A Split iterator that yields each part of the split string
+     */
+    [[nodiscard]] constexpr auto split(const char* pattern) const noexcept -> Split
+    {
+        return Split(*this, str::from(pattern).expect("Invalid UTF-8 sequence"));
+    }
 };
 
+
+namespace raw
+{
 /**
  * @brief A UTF-8–encoded, null-terminated, growable string with custom allocator support
  * @tparam Alloc The allocator type to use for memory management
@@ -1113,8 +1293,12 @@ public:
     }
 };
 
+}
+
+using String = raw::String<std::allocator<std::byte>>;
+
 template<typename Alloc>
-[[nodiscard]] constexpr auto operator==(const String<Alloc>& lhs, const str& rhs) noexcept -> bool
+[[nodiscard]] constexpr auto operator==(const raw::String<Alloc>& lhs, const str& rhs) noexcept -> bool
 {
     if (lhs.size() != rhs.size())
     {
@@ -1124,7 +1308,7 @@ template<typename Alloc>
 }
 
 template<typename Alloc>
-[[nodiscard]] constexpr auto operator==(const str& lhs, const String<Alloc>& rhs) noexcept -> bool
+[[nodiscard]] constexpr auto operator==(const str& lhs, const raw::String<Alloc>& rhs) noexcept -> bool
 {
     if (lhs.size() != rhs.size())
     {
