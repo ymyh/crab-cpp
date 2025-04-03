@@ -21,9 +21,6 @@ compile_commands.json
 *.o
 *.pcm
 
-# Make
-Makefile
-
 # Other
 *.json
 .cursorrules

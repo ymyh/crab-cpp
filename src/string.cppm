@@ -4,10 +4,6 @@ module;
 
 export module crab_cpp:string;
 
-#if defined(_MSC_VER) && defined(__clang__)
-#define offsetof __builtin_offsetof
-#endif
-
 import :panic;
 import :option;
 import :result;
@@ -29,11 +25,6 @@ struct compressed_pair : private T1
 
     [[nodiscard]] constexpr auto first() noexcept -> T1& { return *this; }
     [[nodiscard]] constexpr auto first() const noexcept -> const T1& { return *this; }
-
-    [[nodiscard]] constexpr static auto offset_of_second() noexcept -> size_t
-    {
-        return 0;
-    }
 };
 
 template<typename T1, typename T2>
@@ -46,11 +37,6 @@ struct compressed_pair<T1, T2, false>
 
     [[nodiscard]] constexpr auto get_first() noexcept -> T1& { return first; }
     [[nodiscard]] constexpr auto get_first() const noexcept -> const T1& { return first; }
-
-    [[nodiscard]] constexpr static auto offset_of_second() noexcept -> size_t
-    {
-        return offsetof(compressed_pair<T1, T2, false>, second);
-    }
 };
 
 struct plain_str
@@ -244,6 +230,14 @@ public:
     }
 };
 
+namespace raw
+{
+
+template<typename Alloc>
+struct String;
+
+}
+
 struct str
 {
     using pointer = const std::byte*;
@@ -262,6 +256,12 @@ public:
      * @brief Default constructor
      */
     constexpr str() noexcept : m_data(nullptr), m_len(0) {}
+
+    /**
+     * @brief Constructs a str from a plain_str
+     * @param s The plain_str to construct from
+     */
+    constexpr str(const plain_str& s) noexcept : m_data(s.data), m_len(s.len) {}
 
     /**
      * @brief Creates a string view from a pointer and length
@@ -301,6 +301,12 @@ public:
         return str(std::bit_cast<pointer>(data), len);
     }
 
+    /**
+     * @brief Constructs a str from a pointer and length
+     * @param data Pointer to string data
+     * @param len Length of the string
+     * @return A str containing the string data
+     */
     [[nodiscard]] static constexpr auto from_bytes_unchecked(pointer data, std::size_t len) noexcept -> str
     {
         return str(data, len);
@@ -318,12 +324,21 @@ public:
 
 public:
     /**
-     * @brief Returns a byte slice of this String's contents
+     * @brief Returns a byte slice of this str's contents
      * @return A span containing the string's bytes
      */
     [[nodiscard]] constexpr auto as_bytes() const noexcept -> std::span<const std::byte>
     {
         return std::span<const std::byte>(this->m_data, this->m_len);
+    }
+
+    /**
+     * @brief Returns C-style string of this str's contents
+     * @return A span containing the string's bytes
+     */
+    [[nodiscard]] constexpr auto as_raw() const noexcept -> const char*
+    {
+        return std::bit_cast<const char*>(this->m_data);
     }
 
     /**
@@ -361,7 +376,7 @@ public:
     }
 
     /**
-     * @brief Checks if the string is empty
+     * @brief Returns if the string is empty
      */
     [[nodiscard]] constexpr auto empty() const noexcept -> bool
     {
@@ -374,6 +389,39 @@ public:
     [[nodiscard]] constexpr auto size() const noexcept -> std::size_t
     {
         return this->m_len;
+    }
+
+    /**
+     * @brief Returns a sub str of the given range
+     * @param from the sub str beginning index
+     * @param to the sub str ending index (inclusive)
+     * @panics
+        - If `from` or `to` exceeded str's length
+        - If `to` is greater than `from`
+     */
+    [[nodiscard]] constexpr auto slice(std::size_t from, std::size_t to) const noexcept -> str
+    {
+        if (from > this->m_len || to > this->m_len || std::min(from, to) > this->m_len)
+        {
+            panic("Invalid parameter(s) while calling str::slice, from: {}, to: {}, size: {}", from, to, this->m_len);
+        }
+
+        auto s = str::from_bytes_unchecked(this->m_data + from, to - from);
+        if (!is_valid_utf8(s.m_data, s.m_len))
+        {
+            panic("Invalid UTF-8 sequence while calling str::slice");
+        }
+
+        return s;
+    }
+
+    /**
+     * @brief Returns a sub str of the given range
+     * @see str::slice(size_t, size_t) overload for details
+     */
+    [[nodiscard]] constexpr auto slice(std::size_t from) const noexcept -> str
+    {
+        return this->slice(from, this->m_len);
     }
 
     /**
@@ -393,7 +441,7 @@ public:
             return true;
         }
 
-        return std::memcmp(this->m_data, pattern.m_data, pattern.m_len) == 0;
+        return std::equal(this->m_data, this->m_data + pattern.m_len, pattern.m_data);
     }
 
     /**
@@ -413,11 +461,11 @@ public:
             return true;
         }
 
-        return std::memcmp(
+        return std::equal(
             this->m_data + (this->m_len - pattern.m_len),
-            pattern.m_data,
-            pattern.m_len
-        ) == 0;
+            this->m_data + this->m_len,
+            pattern.m_data
+        );
     }
 
     /**
@@ -426,7 +474,7 @@ public:
      */
     [[nodiscard]] constexpr auto to_std_string() const -> std::string
     {
-        return std::string(reinterpret_cast<const char*>(this->m_data), this->m_len);
+        return std::string(std::bit_cast<const char*>(this->m_data), this->m_len);
     }
 
     /**
@@ -457,6 +505,15 @@ public:
         return size_t(std::distance(haystack.begin(), result.begin()));
     }
 
+    template<typename Alloc>
+    constexpr auto replace(const str& pattern, const str& replacement, raw::String<Alloc>& string) const noexcept -> void;
+
+    template<typename Alloc>
+    constexpr auto replace(const char* pattern, const char* replacement, raw::String<Alloc>& string) const noexcept -> void;
+
+    template<typename Alloc>
+    constexpr auto replace_n(const str& pattern, const str& replacement, raw::String<Alloc>& string, std::size_t n) const noexcept -> void;
+
 // iterators
 private:
     struct Lines
@@ -471,39 +528,48 @@ private:
 
             const str* s = nullptr;
             plain_str span;
+            uint32_t skip = 0;
 
             constexpr explicit LinesIter() noexcept {}
 
             constexpr explicit LinesIter(const str* s) noexcept : s(s)
             {
-                if (s != nullptr) {
+                if (s != nullptr)
+                {
                     // Initialize the first line
                     auto bytes = s->as_bytes();
                     std::size_t start = 0;
                     std::size_t pos = 0;
 
                     // Find the first line ending
-                    while (pos < bytes.size()) {
-                        if (bytes[pos] == std::byte{'\n'}) {
+                    while (pos < bytes.size())
+                    {
+                        if (bytes[pos] == std::byte{'\n'})
+                        {
                             span = plain_str{bytes.data() + start, pos - start};
-                            pos++; // Skip \n
+                            pos += 1; // Skip \n
+                            skip = 1;
                             break;
-                        } else if (bytes[pos] == std::byte{'\r'} && pos + 1 < bytes.size() && bytes[pos + 1] == std::byte{'\n'}) {
+                        }
+                        else if (bytes[pos] == std::byte{'\r'} && pos + 1 < bytes.size() && bytes[pos + 1] == std::byte{'\n'})
+                        {
                             span = plain_str{bytes.data() + start, pos - start};
                             pos += 2; // Skip \r\n
+                            skip = 2;
                             break;
                         }
                         pos++;
                     }
 
                     // If no line ending found, take the whole string
-                    if (pos >= bytes.size()) {
-                        span = plain_str{bytes.data(), bytes.size()};
+                    if (pos >= bytes.size())
+                    {
+                        span = plain_str{.data=bytes.data(), .len=bytes.size()};
                         pos = bytes.size();
                     }
 
                     // Store current position for next iteration
-                    span.len = pos - start;
+                    // span.len = pos - start;
                 }
             }
 
@@ -519,18 +585,18 @@ private:
 
             constexpr auto operator++() noexcept -> LinesIter&
             {
-                if (s == nullptr)
+                if (this->s == nullptr)
                 {
                     return *this;
                 }
 
-                auto bytes = s->as_bytes();
-                std::size_t start = span.data - bytes.data() + span.len;
+                auto bytes = this->s->as_bytes();
+                std::size_t start = span.data - bytes.data() + span.len + skip;
 
                 // If we're at or past the end, mark as finished
                 if (start >= bytes.size())
                 {
-                    s = nullptr;
+                    this->s = nullptr;
                     span = plain_str{nullptr, 0};
                     return *this;
                 }
@@ -548,7 +614,7 @@ private:
                 // If we're at the end after skipping line ending, mark as finished
                 if (start >= bytes.size())
                 {
-                    s = nullptr;
+                    this->s = nullptr;
                     span = plain_str{nullptr, 0};
                     return *this;
                 }
@@ -561,7 +627,8 @@ private:
                     {
                         span = plain_str{bytes.data() + start, pos - start};
                         break;
-                    } else if (bytes[pos] == std::byte{'\r'} && pos + 1 < bytes.size() && bytes[pos + 1] == std::byte{'\n'})
+                    }
+                    else if (bytes[pos] == std::byte{'\r'} && pos + 1 < bytes.size() && bytes[pos + 1] == std::byte{'\n'})
                     {
                         span = plain_str{bytes.data() + start, pos - start};
                         break;
@@ -585,7 +652,10 @@ private:
                 return temp;
             }
 
-            [[nodiscard]] constexpr auto operator<=>(const LinesIter& other) const noexcept -> std::strong_ordering = default;
+            [[nodiscard]] constexpr auto operator==(const LinesIter& other) const noexcept -> bool
+            {
+                return this->s == other.s;
+            }
         };
 
     public:
@@ -634,26 +704,15 @@ private:
                         return;
                     }
 
-                    // Find the first split point
-                    std::size_t pos = 0;
-                    while (pos <= bytes.size()) {
-                        // Search for pattern
-                        bool found = false;
-                        if (pos + pattern->m_len <= bytes.size()) {
-                            found = std::memcmp(bytes.data() + pos, pattern->m_data, pattern->m_len) == 0;
-                        }
-
-                        if (found) {
-                            span = plain_str{bytes.data(), pos};
-                            break;
-                        }
-
-                        if (pos == bytes.size()) {
-                            span = plain_str{bytes.data(), pos};
-                            break;
-                        }
-
-                        pos++;
+                    auto ptr = std::search(this->s->m_data, this->s->m_data + this->s->m_len, this->pattern->m_data, this->pattern->m_data + this->pattern->m_len);
+                    if (ptr != this->s->m_data + this->s->m_len)
+                    {
+                        const auto pos = ptr - this->s->m_data;
+                        this->span = plain_str{.data=bytes.data(), .len=std::size_t(pos)};
+                    }
+                    else
+                    {
+                        span = plain_str{bytes.data(), bytes.size()};
                     }
                 }
             }
@@ -670,21 +729,13 @@ private:
 
             constexpr auto operator++() noexcept -> SplitIter&
             {
-                if (s == nullptr)
+                if (this->s == nullptr)
                 {
                     return *this;
                 }
 
-                auto bytes = s->as_bytes();
+                auto bytes = this->s->as_bytes();
                 std::size_t start = span.data - bytes.data() + span.len;
-
-                // If we've reached the end of the string, end iteration
-                if (start >= bytes.size())
-                {
-                    s = nullptr;
-                    span = plain_str{nullptr, 0};
-                    return *this;
-                }
 
                 // Skip the delimiter
                 start += pattern->m_len;
@@ -692,35 +743,15 @@ private:
                 // If we've reached the end after skipping delimiter, end iteration
                 if (start >= bytes.size())
                 {
-                    // Return empty string as the last element
-                    span = plain_str{bytes.data() + bytes.size(), 0};
+                    this->s = nullptr;
+                    this->pattern = nullptr;
                     return *this;
                 }
 
                 // Find the next split point
-                std::size_t pos = start;
-                while (pos <= bytes.size())
-                {
-                    bool found = false;
-                    if (pos + pattern->m_len <= bytes.size())
-                    {
-                        found = std::memcmp(bytes.data() + pos, pattern->m_data, pattern->m_len) == 0;
-                    }
-
-                    if (found)
-                    {
-                        span = plain_str{bytes.data() + start, pos - start};
-                        break;
-                    }
-
-                    if (pos == bytes.size())
-                    {
-                        span = plain_str{bytes.data() + start, pos - start};
-                        break;
-                    }
-
-                    pos++;
-                }
+                const auto ptr = std::search(this->s->m_data + start, this->s->m_data + this->s->m_len, this->pattern->m_data, this->pattern->m_data + this->pattern->m_len);
+                const auto pos = ptr - this->s->m_data;
+                this->span = plain_str{.data=bytes.data() + start, .len=pos - start};
 
                 return *this;
             }
@@ -732,7 +763,10 @@ private:
                 return temp;
             }
 
-            [[nodiscard]] constexpr auto operator<=>(const SplitIter& other) const noexcept -> std::strong_ordering = default;
+            [[nodiscard]] constexpr auto operator==(const SplitIter& other) const noexcept -> bool
+            {
+                return (this->s == other.s) && (this->pattern == other.pattern);
+            }
         };
 
     public:
@@ -764,7 +798,7 @@ public:
             return this->m_len <=> other.m_len;
         }
 
-        const int result = std::memcmp(this->m_data, other.m_data, min_len);
+        const int result = std::equal(this->m_data, this->m_data + min_len, other.m_data);
         if (result != 0)
         {
             return result <=> 0;
@@ -778,7 +812,7 @@ public:
         if (this->m_len != other.m_len) {
             return false;
         }
-        return std::memcmp(this->m_data, other.m_data, this->m_len) == 0;
+        return std::equal(this->m_data, this->m_data + this->m_len, other.m_data);
     }
 
     /**
@@ -804,16 +838,18 @@ public:
      * @brief Returns an iterator that splits the string by the given pattern
      * @param pattern The pattern to split on
      * @return A Split iterator that yields each part of the split string
+     * @panics If pattern is not a valid UTF-8 sequence
      */
     [[nodiscard]] constexpr auto split(const char* pattern) const noexcept -> Split
     {
-        return Split(*this, str::from(pattern).expect("Invalid UTF-8 sequence"));
+        return Split(*this, str::from(pattern).expect("Invalid UTF-8 sequence while calling str::split#pattern"));
     }
 };
 
 
 namespace raw
 {
+
 /**
  * @brief A UTF-8–encoded, null-terminated, growable string with custom allocator support
  * @tparam Alloc The allocator type to use for memory management
@@ -867,16 +903,8 @@ private:
 
 // constructors
 public:
-    /**
-     * @brief Default constructor
-     */
     constexpr explicit String() noexcept : m_alloc_and_data(Alloc(), nullptr), m_len(0), m_capacity(0) {}
 
-    /**
-     * @brief Constructs a String from a str
-     * @param str The str to construct from
-     * @param alloc The allocator to use
-     */
     constexpr explicit String(const str& str, const Alloc& alloc = Alloc()) : String(alloc, str.data(), str.size(), str.size()) {}
 
     /**
@@ -917,10 +945,6 @@ public:
         return from_raw_parts(str, std::strlen(str), alloc);
     }
 
-    /**
-     * @brief Copy constructor
-     * @param other The string to copy from
-     */
     String(const String& other)
         : m_alloc_and_data(
             std::allocator_traits<Alloc>::select_on_container_copy_construction(other.m_alloc_and_data.first()),
@@ -939,10 +963,6 @@ public:
         }
     }
 
-    /**
-     * @brief Move constructor
-     * @param other The string to move from
-     */
     String(String&& other) noexcept
         : m_alloc_and_data(std::move(other.m_alloc_and_data)), m_len(other.m_len), m_capacity(other.m_capacity)
     {
@@ -951,9 +971,6 @@ public:
         other.m_capacity = 0;
     }
 
-    /**
-     * @brief Destructor
-     */
     ~String()
     {
         if (this->m_alloc_and_data.second)
@@ -1191,11 +1208,11 @@ public:
 
         if (!is_valid_utf8(this->m_alloc_and_data.second, new_len))
         {
-            panic("Invalid UTF-8 sequence");
+            panic("Invalid UTF-8 sequence while calling String::truncate");
         }
 
         this->m_len = new_len;
-        this->m_alloc_and_data.second[this->m_len] = '\0';
+        this->m_alloc_and_data.second[this->m_len] = std::byte{0};
     }
 
     /**
@@ -1274,7 +1291,7 @@ public:
             return this->m_len <=> other.m_len;
         }
 
-        const int result = std::memcmp(this->m_alloc_and_data.second, other.m_alloc_and_data.second, min_len);
+        const int result = std::equal(this->m_alloc_and_data.second, this->m_alloc_and_data.second + min_len, other.m_alloc_and_data.second);
         if (result != 0)
         {
             return result <=> 0;
@@ -1289,7 +1306,8 @@ public:
         {
             return false;
         }
-        return std::memcmp(this->m_alloc_and_data.second, other.m_alloc_and_data.second, this->m_len) == 0;
+
+        return std::equal(this->m_alloc_and_data.second, this->m_alloc_and_data.second + this->m_len, other.m_alloc_and_data.second);
     }
 };
 
@@ -1298,13 +1316,75 @@ public:
 using String = raw::String<std::allocator<std::byte>>;
 
 template<typename Alloc>
+constexpr auto str::replace(const str& pattern, const str& replacement, raw::String<Alloc>& string) const noexcept -> void
+{
+    this->replace_n(pattern, replacement, string, std::numeric_limits<std::size_t>::max());
+}
+
+template<typename Alloc>
+constexpr auto str::replace(const char* pattern, const char* replacement, raw::String<Alloc>& string) const noexcept -> void
+{
+    this->replace(str::from(pattern).expect("Invalid UTF-8 sequence while calling String::replace#pattern"),
+        str::from(replacement).expect("Invalid UTF-8 sequence while calling String::replace#replacement"), string);
+}
+
+template<typename Alloc>
+constexpr auto str::replace_n(const str& pattern, const str& replacement, raw::String<Alloc>& string, std::size_t n) const noexcept -> void
+{
+    string.clear();
+
+    if (pattern.empty())
+    {
+        string.push_str(*this);
+        return;
+    }
+
+    // Calculate the maximum possible size needed for the result
+    // This is a worst-case estimate where every character is replaced
+    std::size_t max_size = this->m_len + (replacement.size() - pattern.size()) * std::min(n, this->m_len / pattern.size());
+    string.reserve(max_size);
+
+    std::size_t pos = 0;
+    std::size_t count = 0;
+
+    while (pos < this->m_len && count < n)
+    {
+        const Option<std::size_t> found = this->find(pattern);
+        if (found.is_none())
+        {
+            break;
+        }
+
+        const auto found_idx = found.unwrap();
+        // Copy the part before the pattern
+        if (found_idx > pos)
+        {
+            string.push_str(str::from_bytes_unchecked(this->m_data + pos, found_idx - pos));
+        }
+
+        // Copy the replacement
+        string.push_str(replacement);
+
+        // Move to the next position after the pattern
+        pos = found_idx + pattern.size();
+        count++;
+    }
+
+    // Copy the remaining part of the string
+    if (pos < this->m_len)
+    {
+        string.push_str(str::from_bytes_unchecked(this->m_data + pos, this->m_len - pos));
+    }
+}
+
+template<typename Alloc>
 [[nodiscard]] constexpr auto operator==(const raw::String<Alloc>& lhs, const str& rhs) noexcept -> bool
 {
     if (lhs.size() != rhs.size())
     {
         return false;
     }
-    return std::memcmp(lhs.data(), rhs.data(), lhs.size()) == 0;
+    return std::equal(lhs.data(), lhs.data() + lhs.size(), rhs.data());
 }
 
 template<typename Alloc>
@@ -1314,7 +1394,24 @@ template<typename Alloc>
     {
         return false;
     }
-    return std::memcmp(lhs.data(), rhs.data(), lhs.size()) == 0;
+    return std::equal(lhs.data(), lhs.data() + lhs.size(), rhs.data());
 }
 
 }
+
+export template<>
+struct std::formatter<crab_cpp::str> : std::formatter<const char*>
+{
+    auto format(const crab_cpp::str& str, std::format_context& ctx) const
+    {
+        return std::format_to(ctx.out(), "{}", std::string(str.as_raw(), str.size()));
+    }
+};
+
+export auto operator<<(std::ostream& os, const crab_cpp::str& str) -> std::ostream&
+{
+    os << std::string(str.as_raw(), str.size());
+    return os;
+}
+
+// TODO formatter and operator<< of String
