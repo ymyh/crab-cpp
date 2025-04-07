@@ -81,17 +81,17 @@ struct FromUtf8Error
 
     while (pos < len)
     {
-        utf8proc_ssize_t result = utf8proc_iterate(
+        utf8proc_ssize_t advance = utf8proc_iterate(
             reinterpret_cast<const utf8proc_uint8_t*>(str + pos),
             len - pos,
             &codepoint
         );
 
-        if (result < 0)
+        if (advance < 0)
         {
             return false;
         }
-        pos += result;
+        pos += advance;
     }
     return true;
 }
@@ -383,6 +383,9 @@ public:
         return this->m_len == 0;
     }
 
+    template<typename Alloc>
+    constexpr auto repeat(size_t n, raw::String<Alloc>& string) const -> void;
+
     /**
      * @brief Returns the length of the string in bytes
      */
@@ -513,6 +516,93 @@ public:
 
     template<typename Alloc>
     constexpr auto replace_n(const str& pattern, const str& replacement, raw::String<Alloc>& string, std::size_t n) const noexcept -> void;
+
+    /**
+     * @brief Converts ASCII uppercase characters to lowercase
+     * @return A new str with ASCII uppercase characters converted to lowercase
+     */
+    template<typename Alloc>
+    constexpr auto to_ascii_lower(raw::String<Alloc>& string) const -> void;
+
+    /**
+     * @brief Converts ASCII lowercase characters to uppercase
+     * @return A new str with ASCII lowercase characters converted to uppercase
+     */
+    template<typename Alloc>
+    constexpr auto to_ascii_upper(raw::String<Alloc>& string) const -> void;
+
+    [[nodiscard]] auto trim_ascii() const -> str
+    {
+        const auto s = this->trim_ascii_start();
+        return s.trim_ascii_end();
+    }
+
+    [[nodiscard]] auto trim_ascii_start() const -> str
+    {
+        if (this->m_len == 0 || this->m_data == nullptr)
+        {
+            return *this;
+        }
+
+        const std::byte* start = this->m_data;
+        const std::byte* end = this->m_data + this->m_len;
+
+        while (start < end)
+        {
+            utf8proc_int32_t codepoint;
+            utf8proc_ssize_t advance = utf8proc_iterate(reinterpret_cast<const utf8proc_uint8_t*>(start),
+                                                        end - start,
+                                                        &codepoint);
+            if (advance <= 0)
+            {
+                break;
+            }
+
+            if (!(codepoint == 0x20 ||
+                  codepoint == 0x09 ||
+                  codepoint == 0x0A ||
+                  codepoint == 0x0C ||
+                  codepoint == 0x0D))
+            {
+                break;
+            }
+
+            start += advance;
+        }
+
+        return str(start, this->m_len - (start - this->m_data));
+    }
+
+    [[nodiscard]] auto trim_ascii_end() const -> str
+    {
+        const std::byte* start = this->m_data;
+        const std::byte* end = this->m_data + this->m_len;
+
+        const std::byte* last_non_ws = start;
+        for (const std::byte* p = start; p < end; )
+        {
+            utf8proc_int32_t codepoint;
+            utf8proc_ssize_t advance = utf8proc_iterate(reinterpret_cast<const utf8proc_uint8_t*>(p),
+                                                        end - p,
+                                                        &codepoint);
+            if (advance <= 0)
+            {
+                break;
+            }
+
+            if (!(codepoint == 0x20 ||
+                  codepoint == 0x09 ||
+                  codepoint == 0x0A ||
+                  codepoint == 0x0C ||
+                  codepoint == 0x0D))
+            {
+                last_non_ws = p;
+            }
+            p += advance;
+        }
+
+        return str(start, last_non_ws - start);
+    }
 
 // iterators
 private:
@@ -788,6 +878,31 @@ private:
         }
     };
 
+    struct SplitASCIIWhiteSpace
+    {
+    public:
+        const str& s;
+
+        struct SplitASCIIWhiteSpaceIter
+        {
+
+        };
+
+    public:
+        constexpr SplitASCIIWhiteSpace(const str& s) : s(s) {}
+
+    public:
+        [[nodiscard]] constexpr auto begin() const noexcept -> SplitASCIIWhiteSpaceIter
+        {
+            // return SplitASCIIWhiteSpaceIter(&this->s);
+        }
+
+        [[nodiscard]] constexpr auto end() const noexcept -> SplitASCIIWhiteSpaceIter
+        {
+            // return SplitASCIIWhiteSpaceIter(nullptr);
+        }
+    };
+
 // operators
 public:
     [[nodiscard]] constexpr auto operator<=>(const str& other) const noexcept -> std::strong_ordering
@@ -858,6 +973,7 @@ template<typename Alloc = std::allocator<std::byte>>
 struct String
 {
     using pointer = typename std::allocator_traits<Alloc>::pointer;
+    friend struct crab_cpp::str;
 
 private:
     struct StrProxy
@@ -1316,6 +1432,17 @@ public:
 using String = raw::String<std::allocator<std::byte>>;
 
 template<typename Alloc>
+constexpr auto str::repeat(size_t n, raw::String<Alloc>& string) const -> void
+{
+    string.clear();
+
+    for (size_t i = 0; i < n; i += 1)
+    {
+        string.push_str(*this);
+    }
+}
+
+template<typename Alloc>
 constexpr auto str::replace(const str& pattern, const str& replacement, raw::String<Alloc>& string) const noexcept -> void
 {
     this->replace_n(pattern, replacement, string, std::numeric_limits<std::size_t>::max());
@@ -1378,6 +1505,58 @@ constexpr auto str::replace_n(const str& pattern, const str& replacement, raw::S
 }
 
 template<typename Alloc>
+constexpr auto str::to_ascii_lower(raw::String<Alloc>& string) const -> void
+{
+    string.clear();
+    string.push_str(*this);
+
+    utf8proc_int32_t codepoint;
+    std::size_t pos = 0;
+
+    while (pos < this->m_len)
+    {
+        utf8proc_ssize_t advance = utf8proc_iterate(
+            reinterpret_cast<const utf8proc_uint8_t*>(this->m_data + pos),
+            this->m_len - pos,
+            &codepoint
+        );
+
+        if (codepoint >= 65 && codepoint <= 90)
+        {
+            string.m_alloc_and_data.second[pos] = static_cast<std::byte>(codepoint + 32);
+        }
+
+        pos += advance;
+    }
+}
+
+template<typename Alloc>
+constexpr auto str::to_ascii_upper(raw::String<Alloc>& string) const -> void
+{
+    string.clear();
+    string.push_str(*this);
+
+    utf8proc_int32_t codepoint;
+    std::size_t pos = 0;
+
+    while (pos < this->m_len)
+    {
+        utf8proc_ssize_t advance = utf8proc_iterate(
+            reinterpret_cast<const utf8proc_uint8_t*>(this->m_data + pos),
+            this->m_len - pos,
+            &codepoint
+        );
+
+        if (codepoint >= 97 && codepoint <= 122)
+        {
+            string.m_alloc_and_data.second[pos] = static_cast<std::byte>(codepoint - 32);
+        }
+
+        pos += advance;
+    }
+}
+
+template<typename Alloc>
 [[nodiscard]] constexpr auto operator==(const raw::String<Alloc>& lhs, const str& rhs) noexcept -> bool
 {
     if (lhs.size() != rhs.size())
@@ -1404,14 +1583,28 @@ struct std::formatter<crab_cpp::str> : std::formatter<const char*>
 {
     auto format(const crab_cpp::str& str, std::format_context& ctx) const
     {
-        return std::format_to(ctx.out(), "{}", std::string(str.as_raw(), str.size()));
+        return std::format_to(ctx.out(), "{}", str.to_std_string());
     }
 };
 
 export auto operator<<(std::ostream& os, const crab_cpp::str& str) -> std::ostream&
 {
-    os << std::string(str.as_raw(), str.size());
+    os << str.to_std_string();
     return os;
 }
 
-// TODO formatter and operator<< of String
+export template<typename Alloc>
+struct std::formatter<crab_cpp::raw::String<Alloc>> : std::formatter<const char*>
+{
+    auto format(const crab_cpp::raw::String<Alloc>& str, std::format_context& ctx) const
+    {
+        return std::format_to(ctx.out(), "{}", str.to_std_string());
+    }
+};
+
+export template<typename Alloc>
+auto operator<<(std::ostream& os, const crab_cpp::raw::String<Alloc>& str) -> std::ostream&
+{
+    os << str.to_std_string();
+    return os;
+}
