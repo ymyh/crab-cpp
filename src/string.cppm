@@ -41,8 +41,12 @@ struct compressed_pair<T1, T2, false>
 
 struct plain_str
 {
-    const std::byte* data;
-    size_t len;
+    const std::byte* data = nullptr;
+    size_t len = 0;
+
+    explicit constexpr plain_str() noexcept = default;
+
+    explicit constexpr plain_str(const std::byte* data, size_t len) noexcept : data(data), len(len) {}
 
     [[nodiscard]] constexpr auto operator<=>(const plain_str& other) const noexcept -> std::strong_ordering = default;
 };
@@ -383,6 +387,11 @@ public:
         return this->m_len == 0;
     }
 
+    /**
+     * @brief Creates a new String by repeating a string n times.
+     * @param n The number of times to repeat the string
+     * @panics This function will panic if the capacity would overflow.
+     */
     template<typename Alloc>
     constexpr auto repeat(size_t n, raw::String<Alloc>& string) const -> void;
 
@@ -508,6 +517,16 @@ public:
         return size_t(std::distance(haystack.begin(), result.begin()));
     }
 
+    /**
+     * @brief Returns the byte index of the first character that matches the pattern
+     * @param pattern The pattern to search for
+     * @return Option containing the byte index of the first match, or None if not found
+     */
+    [[nodiscard]] constexpr auto find(const char* pattern) const noexcept -> Option<std::size_t>
+    {
+        return this->find(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::find#pattern"));
+    }
+
     template<typename Alloc>
     constexpr auto replace(const str& pattern, const str& replacement, raw::String<Alloc>& string) const noexcept -> void;
 
@@ -517,26 +536,59 @@ public:
     template<typename Alloc>
     constexpr auto replace_n(const str& pattern, const str& replacement, raw::String<Alloc>& string, std::size_t n) const noexcept -> void;
 
+    [[nodiscard]] constexpr auto rfind(const str& pattern) const noexcept -> Option<std::size_t>
+    {
+        if (pattern.m_len > this->m_len || pattern.m_len == 0)
+        {
+            return None{};
+        }
+
+        std::span<const std::byte> haystack(this->m_data, this->m_len);
+        std::span<const std::byte> needle(pattern.m_data, pattern.m_len);
+
+        auto result = std::ranges::find_end(haystack, needle);
+
+        if (result.empty())
+        {
+            return None{};
+        }
+
+        return size_t(std::distance(haystack.begin(), result.begin()));
+    }
+
+    [[nodiscard]] constexpr auto rfind(const char* pattern) const noexcept -> Option<std::size_t>
+    {
+        return this->rfind(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::rfind#pattern"));
+    }
+
     /**
      * @brief Converts ASCII uppercase characters to lowercase
-     * @return A new str with ASCII uppercase characters converted to lowercase
+     * @param string A String stores original str's data with ASCII uppercase characters converted to lowercase
      */
     template<typename Alloc>
-    constexpr auto to_ascii_lower(raw::String<Alloc>& string) const -> void;
+    constexpr auto to_ascii_lowercase(raw::String<Alloc>& string) const -> void;
 
     /**
      * @brief Converts ASCII lowercase characters to uppercase
-     * @return A new str with ASCII lowercase characters converted to uppercase
+     * @param string A String stores original str's data with ASCII lowercase characters converted to uppercase
      */
     template<typename Alloc>
-    constexpr auto to_ascii_upper(raw::String<Alloc>& string) const -> void;
+    constexpr auto to_ascii_uppercase(raw::String<Alloc>& string) const -> void;
 
+    /**
+     * @brief Returns a str with leading and trailing ASCII whitespace removed.
+     * ASCII whitespace refers to U+0020 SPACE, U+0009 HORIZONTAL TAB, U+000A LINE FEED, U+000C FORM FEED, or U+000D CARRIAGE RETURN.
+     */
     [[nodiscard]] auto trim_ascii() const -> str
     {
         const auto s = this->trim_ascii_start();
         return s.trim_ascii_end();
     }
 
+    /**
+     * @brief Returns a str with leading ASCII whitespace removed.
+     * ASCII whitespace refers to U+0020 SPACE, U+0009 HORIZONTAL TAB, U+000A LINE FEED, U+000C FORM FEED, or U+000D CARRIAGE RETURN.
+     */
     [[nodiscard]] auto trim_ascii_start() const -> str
     {
         if (this->m_len == 0 || this->m_data == nullptr)
@@ -573,12 +625,16 @@ public:
         return str(start, this->m_len - (start - this->m_data));
     }
 
+    /**
+     * @brief Returns a str with leading ASCII whitespace removed.
+     * ASCII whitespace refers to U+0020 SPACE, U+0009 HORIZONTAL TAB, U+000A LINE FEED, U+000C FORM FEED, or U+000D CARRIAGE RETURN.
+     */
     [[nodiscard]] auto trim_ascii_end() const -> str
     {
         const std::byte* start = this->m_data;
         const std::byte* end = this->m_data + this->m_len;
-
         const std::byte* last_non_ws = start;
+
         for (const std::byte* p = start; p < end; )
         {
             utf8proc_int32_t codepoint;
@@ -636,14 +692,14 @@ private:
                     {
                         if (bytes[pos] == std::byte{'\n'})
                         {
-                            span = plain_str{bytes.data() + start, pos - start};
+                            span = plain_str(bytes.data() + start, pos - start);
                             pos += 1; // Skip \n
                             skip = 1;
                             break;
                         }
                         else if (bytes[pos] == std::byte{'\r'} && pos + 1 < bytes.size() && bytes[pos + 1] == std::byte{'\n'})
                         {
-                            span = plain_str{bytes.data() + start, pos - start};
+                            span = plain_str(bytes.data() + start, pos - start);
                             pos += 2; // Skip \r\n
                             skip = 2;
                             break;
@@ -654,12 +710,9 @@ private:
                     // If no line ending found, take the whole string
                     if (pos >= bytes.size())
                     {
-                        span = plain_str{.data=bytes.data(), .len=bytes.size()};
+                        span = plain_str(bytes.data(), bytes.size());
                         pos = bytes.size();
                     }
-
-                    // Store current position for next iteration
-                    // span.len = pos - start;
                 }
             }
 
@@ -687,7 +740,7 @@ private:
                 if (start >= bytes.size())
                 {
                     this->s = nullptr;
-                    span = plain_str{nullptr, 0};
+                    span = plain_str(nullptr, 0);
                     return *this;
                 }
 
@@ -705,7 +758,7 @@ private:
                 if (start >= bytes.size())
                 {
                     this->s = nullptr;
-                    span = plain_str{nullptr, 0};
+                    span = plain_str(nullptr, 0);
                     return *this;
                 }
 
@@ -715,12 +768,12 @@ private:
                 {
                     if (bytes[pos] == std::byte{'\n'})
                     {
-                        span = plain_str{bytes.data() + start, pos - start};
+                        span = plain_str(bytes.data() + start, pos - start);
                         break;
                     }
                     else if (bytes[pos] == std::byte{'\r'} && pos + 1 < bytes.size() && bytes[pos + 1] == std::byte{'\n'})
                     {
-                        span = plain_str{bytes.data() + start, pos - start};
+                        span = plain_str(bytes.data() + start, pos - start);
                         break;
                     }
                     pos++;
@@ -729,7 +782,7 @@ private:
                 // If no line ending found, take the rest of the string
                 if (pos >= bytes.size())
                 {
-                    span = plain_str{bytes.data() + start, bytes.size() - start};
+                    span = plain_str(bytes.data() + start, bytes.size() - start);
                 }
 
                 return *this;
@@ -790,7 +843,7 @@ private:
                     // If pattern is empty, return the entire string
                     if (pattern->m_len == 0)
                     {
-                        span = plain_str{bytes.data(), bytes.size()};
+                        span = plain_str(bytes.data(), bytes.size());
                         return;
                     }
 
@@ -798,23 +851,23 @@ private:
                     if (ptr != this->s->m_data + this->s->m_len)
                     {
                         const auto pos = ptr - this->s->m_data;
-                        this->span = plain_str{.data=bytes.data(), .len=std::size_t(pos)};
+                        this->span = plain_str(bytes.data(), std::size_t(pos));
                     }
                     else
                     {
-                        span = plain_str{bytes.data(), bytes.size()};
+                        span = plain_str(bytes.data(), bytes.size());
                     }
                 }
             }
 
             [[nodiscard]] constexpr auto operator*() const noexcept -> const plain_str&
             {
-                return span;
+                return this->span;
             }
 
             [[nodiscard]] constexpr auto operator->() const noexcept -> const plain_str*
             {
-                return &span;
+                return &this->span;
             }
 
             constexpr auto operator++() noexcept -> SplitIter&
@@ -841,7 +894,7 @@ private:
                 // Find the next split point
                 const auto ptr = std::search(this->s->m_data + start, this->s->m_data + this->s->m_len, this->pattern->m_data, this->pattern->m_data + this->pattern->m_len);
                 const auto pos = ptr - this->s->m_data;
-                this->span = plain_str{.data=bytes.data() + start, .len=pos - start};
+                this->span = plain_str(bytes.data() + start, pos - start);
 
                 return *this;
             }
@@ -885,7 +938,81 @@ private:
 
         struct SplitASCIIWhiteSpaceIter
         {
+            const str* s;
+            plain_str span;
 
+            explicit SplitASCIIWhiteSpaceIter(const str* s) noexcept : s(s), span(s->m_data, s->m_len)
+            {
+                if (s != nullptr)
+                {
+                    utf8proc_int32_t codepoint;
+                    size_t pos = 0;
+                    const auto size = this->s->size();
+
+                    while (pos < size)
+                    {
+                        utf8proc_ssize_t advance = utf8proc_iterate(
+                            reinterpret_cast<const utf8proc_uint8_t*>(this->s->m_data + pos),
+                            size - pos,
+                            &codepoint
+                        );
+
+                        if (!(codepoint == 0x20 ||
+                            codepoint == 0x09 ||
+                            codepoint == 0x0A ||
+                            codepoint == 0x0C ||
+                            codepoint == 0x0D))
+                        {
+                            break;
+                        }
+
+                        pos += advance;
+                    }
+
+                    this->span = plain_str(this->s->m_data, pos);
+                }
+            }
+
+            [[nodiscard]] auto operator++() noexcept -> SplitASCIIWhiteSpaceIter&
+            {
+                utf8proc_int32_t codepoint;
+                size_t pos = this->span.data - this->s->m_data + this->span.len;
+                const auto size = this->s->size();
+
+                while (pos < size)
+                {
+                    utf8proc_ssize_t advance = utf8proc_iterate(
+                        reinterpret_cast<const utf8proc_uint8_t*>(this->s->m_data + pos),
+                        size - pos,
+                        &codepoint
+                    );
+
+                    if (!(codepoint == 0x20 ||
+                        codepoint == 0x09 ||
+                        codepoint == 0x0A ||
+                        codepoint == 0x0C ||
+                        codepoint == 0x0D))
+                    {
+                        break;
+                    }
+
+                    pos += advance;
+                }
+
+                this->span = plain_str(this->s->m_data + pos, size - pos);
+
+                return *this;
+            }
+
+            [[nodiscard]] constexpr auto operator*() const noexcept -> const plain_str&
+            {
+                return this->span;
+            }
+
+            [[nodiscard]] constexpr auto operator->() const noexcept -> const plain_str*
+            {
+                return &this->span;
+            }
         };
 
     public:
@@ -894,12 +1021,12 @@ private:
     public:
         [[nodiscard]] constexpr auto begin() const noexcept -> SplitASCIIWhiteSpaceIter
         {
-            // return SplitASCIIWhiteSpaceIter(&this->s);
+            return SplitASCIIWhiteSpaceIter(&this->s);
         }
 
         [[nodiscard]] constexpr auto end() const noexcept -> SplitASCIIWhiteSpaceIter
         {
-            // return SplitASCIIWhiteSpaceIter(nullptr);
+            return SplitASCIIWhiteSpaceIter(nullptr);
         }
     };
 
@@ -961,7 +1088,6 @@ public:
     }
 };
 
-
 namespace raw
 {
 
@@ -985,8 +1111,8 @@ private:
     };
 
     compressed_pair<Alloc, pointer> m_alloc_and_data;
-    std::size_t m_len;
-    std::size_t m_capacity;
+    std::size_t m_len = 0;
+    std::size_t m_capacity = 0;
 
     /**
      * @brief Private constructor for internal use
@@ -1019,9 +1145,9 @@ private:
 
 // constructors
 public:
-    constexpr explicit String() noexcept : m_alloc_and_data(Alloc(), nullptr), m_len(0), m_capacity(0) {}
+    constexpr explicit String(const Alloc& alloc = Alloc()) noexcept : m_alloc_and_data(alloc, nullptr), m_len(0), m_capacity(0) {}
 
-    constexpr explicit String(const str& str, const Alloc& alloc = Alloc()) : String(alloc, str.data(), str.size(), str.size()) {}
+    constexpr String(const str& str, const Alloc& alloc = Alloc()) : String(alloc, str.data(), str.size(), str.size()) {}
 
     /**
      * @brief Creates a string from a UTF-8 string
@@ -1058,7 +1184,7 @@ public:
      */
     [[nodiscard]] static auto from(const char* str, const Alloc& alloc = Alloc()) noexcept -> Result<String, FromUtf8Error>
     {
-        return from_raw_parts(str, std::strlen(str), alloc);
+        return String::from_raw_parts(str, std::strlen(str), alloc);
     }
 
     String(const String& other)
@@ -1114,6 +1240,15 @@ public:
     }
 
     /**
+     * @brief Returns a byte slice of this String's contents
+     * @return A span containing the string's bytes
+     */
+    [[nodiscard]] constexpr auto as_raw() const noexcept -> const char*
+    {
+        return reinterpret_cast<const char*>(this->m_alloc_and_data.second);
+    }
+
+    /**
      * @brief Returns the current capacity of the buffer in bytes
      * @return The capacity in bytes
      */
@@ -1144,6 +1279,58 @@ public:
     [[nodiscard]] constexpr auto data() noexcept -> std::byte*
     {
         return this->m_alloc_and_data.second;
+    }
+
+    /**
+     * @brief Converts this string to its ASCII lower case equivalent in-place.
+     * ASCII letters 'A' to 'Z' are mapped to 'a' to 'z', but non-ASCII letters are unchanged.
+     */
+    auto make_ascii_lowercase() noexcept -> void
+    {
+        utf8proc_int32_t codepoint;
+        std::size_t pos = 0;
+
+        while (pos < this->m_len)
+        {
+            utf8proc_ssize_t advance = utf8proc_iterate(
+                reinterpret_cast<const utf8proc_uint8_t*>(this->m_alloc_and_data.second + pos),
+                this->m_len - pos,
+                &codepoint
+            );
+
+            if (codepoint >= 65 && codepoint <= 90)
+            {
+                this->m_alloc_and_data.second[pos] = static_cast<std::byte>(codepoint + 32);
+            }
+
+            pos += advance;
+        }
+    }
+
+    /**
+     * @brief Converts this string to its ASCII lower case equivalent in-place.
+     * ASCII letters 'a' to 'z' are mapped to 'A' to 'Z', but non-ASCII letters are unchanged.
+     */
+    auto make_ascii_uppercase() noexcept -> void
+    {
+        utf8proc_int32_t codepoint;
+        std::size_t pos = 0;
+
+        while (pos < this->m_len)
+        {
+            utf8proc_ssize_t advance = utf8proc_iterate(
+                reinterpret_cast<const utf8proc_uint8_t*>(this->m_alloc_and_data.second + pos),
+                this->m_len - pos,
+                &codepoint
+            );
+
+            if (codepoint >= 97 && codepoint <= 122)
+            {
+                this->m_alloc_and_data.second[pos] = static_cast<std::byte>(codepoint - 32);
+            }
+
+            pos += advance;
+        }
     }
 
     /**
@@ -1274,8 +1461,8 @@ public:
         }
 
         // Verify that 'at' is on a UTF-8 code point boundary
-        if (!is_valid_utf8(reinterpret_cast<const char*>(this->m_alloc_and_data.second), at) ||
-            !is_valid_utf8(reinterpret_cast<const char*>(this->m_alloc_and_data.second + at), this->m_len - at))
+        if (!is_valid_utf8(this->m_alloc_and_data.second, at) ||
+            !is_valid_utf8(this->m_alloc_and_data.second + at, this->m_len - at))
         {
             panic("Split index not on UTF-8 code point boundary");
         }
@@ -1434,7 +1621,13 @@ using String = raw::String<std::allocator<std::byte>>;
 template<typename Alloc>
 constexpr auto str::repeat(size_t n, raw::String<Alloc>& string) const -> void
 {
+    if (n > std::numeric_limits<std::size_t>::max() / this->m_len)
+    {
+        panic("Repeat times overflow");
+    }
+
     string.clear();
+    string.reserve(this->m_len * n);
 
     for (size_t i = 0; i < n; i += 1)
     {
@@ -1505,55 +1698,21 @@ constexpr auto str::replace_n(const str& pattern, const str& replacement, raw::S
 }
 
 template<typename Alloc>
-constexpr auto str::to_ascii_lower(raw::String<Alloc>& string) const -> void
+constexpr auto str::to_ascii_lowercase(raw::String<Alloc>& string) const -> void
 {
     string.clear();
     string.push_str(*this);
 
-    utf8proc_int32_t codepoint;
-    std::size_t pos = 0;
-
-    while (pos < this->m_len)
-    {
-        utf8proc_ssize_t advance = utf8proc_iterate(
-            reinterpret_cast<const utf8proc_uint8_t*>(this->m_data + pos),
-            this->m_len - pos,
-            &codepoint
-        );
-
-        if (codepoint >= 65 && codepoint <= 90)
-        {
-            string.m_alloc_and_data.second[pos] = static_cast<std::byte>(codepoint + 32);
-        }
-
-        pos += advance;
-    }
+    string.make_ascii_lowercase();
 }
 
 template<typename Alloc>
-constexpr auto str::to_ascii_upper(raw::String<Alloc>& string) const -> void
+constexpr auto str::to_ascii_uppercase(raw::String<Alloc>& string) const -> void
 {
     string.clear();
     string.push_str(*this);
 
-    utf8proc_int32_t codepoint;
-    std::size_t pos = 0;
-
-    while (pos < this->m_len)
-    {
-        utf8proc_ssize_t advance = utf8proc_iterate(
-            reinterpret_cast<const utf8proc_uint8_t*>(this->m_data + pos),
-            this->m_len - pos,
-            &codepoint
-        );
-
-        if (codepoint >= 97 && codepoint <= 122)
-        {
-            string.m_alloc_and_data.second[pos] = static_cast<std::byte>(codepoint - 32);
-        }
-
-        pos += advance;
-    }
+    string.make_ascii_uppercase();
 }
 
 template<typename Alloc>
@@ -1576,6 +1735,44 @@ template<typename Alloc>
     return std::equal(lhs.data(), lhs.data() + lhs.size(), rhs.data());
 }
 
+template<typename Alloc>
+[[nodiscard]] constexpr auto operator==(const raw::String<Alloc>& lhs, const char* rhs) noexcept -> bool
+{
+    if (lhs.size() != std::strlen(rhs))
+    {
+        return false;
+    }
+    return std::equal(lhs.data(), lhs.data() + lhs.size(), reinterpret_cast<const std::byte*>(rhs));
+}
+
+template<typename Alloc>
+[[nodiscard]] constexpr auto operator==(const char* lhs, const raw::String<Alloc>& rhs) noexcept -> bool
+{
+    if (std::strlen(lhs) != rhs.size())
+    {
+        return false;
+    }
+    return std::equal(rhs.data(), rhs.data() + rhs.size(), reinterpret_cast<const std::byte*>(lhs));
+}
+
+[[nodiscard]] constexpr auto operator==(const str& lhs, const char* rhs) noexcept -> bool
+{
+    if (lhs.size() != std::strlen(rhs))
+    {
+        return false;
+    }
+    return std::equal(lhs.data(), lhs.data() + lhs.size(), reinterpret_cast<const std::byte*>(rhs));
+}
+
+[[nodiscard]] constexpr auto operator==(const char* lhs, const str& rhs) noexcept -> bool
+{
+    if (std::strlen(lhs) != rhs.size())
+    {
+        return false;
+    }
+    return std::equal(rhs.data(), rhs.data() + rhs.size(), reinterpret_cast<const std::byte*>(lhs));
+}
+
 }
 
 export template<>
@@ -1583,13 +1780,13 @@ struct std::formatter<crab_cpp::str> : std::formatter<const char*>
 {
     auto format(const crab_cpp::str& str, std::format_context& ctx) const
     {
-        return std::format_to(ctx.out(), "{}", str.to_std_string());
+        return std::format_to(ctx.out(), "{}", std::string_view(str.as_raw(), str.size()));
     }
 };
 
 export auto operator<<(std::ostream& os, const crab_cpp::str& str) -> std::ostream&
 {
-    os << str.to_std_string();
+    os << std::string_view(str.as_raw(), str.size());
     return os;
 }
 
@@ -1598,13 +1795,13 @@ struct std::formatter<crab_cpp::raw::String<Alloc>> : std::formatter<const char*
 {
     auto format(const crab_cpp::raw::String<Alloc>& str, std::format_context& ctx) const
     {
-        return std::format_to(ctx.out(), "{}", str.to_std_string());
+        return std::format_to(ctx.out(), "{}", std::string_view(reinterpret_cast<const char*>(str.data()), str.size()));
     }
 };
 
 export template<typename Alloc>
 auto operator<<(std::ostream& os, const crab_cpp::raw::String<Alloc>& str) -> std::ostream&
 {
-    os << str.to_std_string();
+    os << std::string_view(reinterpret_cast<const char*>(str.data()), str.size());
     return os;
 }

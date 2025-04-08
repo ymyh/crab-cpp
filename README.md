@@ -130,7 +130,39 @@ int main()
 }
 ```
 
+#### Char & str & String (Optional feature)
+Those three types are basically a weaken version of `char`, `&str`, `String` in Rust, but with null terminator for better interoperability with C/C++ APIs.
+Using utf8proc to handle utf8 encoding, supports Unicode 16.
+Still lacking many methods, but can be used for simple string operations.
+implemented std::formatter and operator<< for print, but it will stop printing while encountering first null terminator.
+Noted `String` is actually a alias of `crab_cpp::raw::String<std::allocator<std::byte>>`, use the raw one if you want to use a custom allocator.
+
+```c++
+import std;
+import crab_cpp;
+
+#include <assert.h>
+
+int main()
+{
+    auto s = str::from("Hello, world!").unwrap();
+    auto ss = String::from("Hello, world!").unwrap();
+
+    assert(s == ss);
+
+    // operator-> returns str, which simulates Deref<Target=str> in Rust
+    // split returns a iterator that yields a internal type that can be constructed to str
+    auto vec = ss->split(",") | std::ranges::to<std::vector<str>>();
+    assert(vec[0] == "Hello");
+    assert(vec[1].trim_ascii() == "World!");
+}
+```
+
 ### Why Crab_cpp ?
-Compared to std::optional and std::expected, Crab_cpp offers
+Compared to std::optional, std::expected, Crab_cpp offers
 - Rust-like APIs
 - Simple pattern matching support
+
+Compared to std::string_view, std::string, Crab_cpp offers
+- UTF-8 encoded
+- Rust-like APIs
