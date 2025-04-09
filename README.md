@@ -154,7 +154,7 @@ int main()
     // split returns a iterator that yields a internal type that can be constructed to str
     auto vec = ss->split(",") | std::ranges::to<std::vector<str>>();
     assert(vec[0] == "Hello");
-    assert(vec[1].trim_ascii() == "World!");
+    assert(vec[1].trim_ascii() == "world!");
 }
 ```
 

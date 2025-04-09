@@ -1,6 +1,7 @@
 module;
 
 #include "include/utf8proc.h"
+#define offsetof(t, d) __builtin_offsetof(t, d)
 
 export module crab_cpp:string;
 
@@ -25,6 +26,8 @@ struct compressed_pair : private T1
 
     [[nodiscard]] constexpr auto first() noexcept -> T1& { return *this; }
     [[nodiscard]] constexpr auto first() const noexcept -> const T1& { return *this; }
+
+    constexpr auto offsetof_second() const noexcept -> std::size_t { return 0; }
 };
 
 template<typename T1, typename T2>
@@ -37,6 +40,8 @@ struct compressed_pair<T1, T2, false>
 
     [[nodiscard]] constexpr auto get_first() noexcept -> T1& { return first; }
     [[nodiscard]] constexpr auto get_first() const noexcept -> const T1& { return first; }
+
+    [[nodiscard]] constexpr auto offsetof_second() const noexcept -> std::size_t { return offsetof(compressed_pair, T2); }
 };
 
 struct plain_str
@@ -47,6 +52,12 @@ struct plain_str
     explicit constexpr plain_str() noexcept = default;
 
     explicit constexpr plain_str(const std::byte* data, size_t len) noexcept : data(data), len(len) {}
+
+    // constexpr plain_str(const plain_str& other) = default;
+
+    // constexpr plain_str(plain_str&& other) = default;
+
+    // [[nodiscard]] constexpr auto operator=(const plain_str& other) const noexcept -> plain_str& = default;
 
     [[nodiscard]] constexpr auto operator<=>(const plain_str& other) const noexcept -> std::strong_ordering = default;
 };
@@ -392,8 +403,25 @@ public:
      * @param n The number of times to repeat the string
      * @panics This function will panic if the capacity would overflow.
      */
-    template<typename Alloc>
-    constexpr auto repeat(size_t n, raw::String<Alloc>& string) const -> void;
+    template<typename Alloc = std::allocator<std::byte>>
+    constexpr auto repeat(size_t n) const -> raw::String<Alloc>
+    {
+        if (n > std::numeric_limits<std::size_t>::max() / this->m_len)
+        {
+            panic("Repeat times overflow");
+        }
+
+        auto string = raw::String<Alloc>();
+        // string.clear();
+        string.reserve(this->m_len * n);
+
+        for (size_t i = 0; i < n; i += 1)
+        {
+            string.push_str(*this);
+        }
+
+        return string;
+    }
 
     /**
      * @brief Returns the length of the string in bytes
@@ -527,14 +555,70 @@ public:
         return this->find(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::find#pattern"));
     }
 
-    template<typename Alloc>
-    constexpr auto replace(const str& pattern, const str& replacement, raw::String<Alloc>& string) const noexcept -> void;
+    template<typename Alloc = std::allocator<std::byte>>
+    constexpr auto replace(const str& pattern, const str& replacement) const -> raw::String<Alloc>
+    {
+        this->replace_n<Alloc>(pattern, replacement, std::numeric_limits<std::size_t>::max());
+    }
 
-    template<typename Alloc>
-    constexpr auto replace(const char* pattern, const char* replacement, raw::String<Alloc>& string) const noexcept -> void;
+    template<typename Alloc = std::allocator<std::byte>>
+    constexpr auto replace(const char* pattern, const char* replacement) const -> raw::String<Alloc>
+    {
+        this->replace<Alloc>(str::from(pattern).expect("Invalid UTF-8 sequence while calling String::replace#pattern"),
+        str::from(replacement).expect("Invalid UTF-8 sequence while calling String::replace#replacement"));
+    }
 
-    template<typename Alloc>
-    constexpr auto replace_n(const str& pattern, const str& replacement, raw::String<Alloc>& string, std::size_t n) const noexcept -> void;
+    template<typename Alloc = std::allocator<std::byte>>
+    constexpr auto replace_n(const str& pattern, const str& replacement, std::size_t n) const -> raw::String<Alloc>
+    {
+        auto string = raw::String<Alloc>();
+        // string.clear();
+
+        if (pattern.empty())
+        {
+            string.push_str(*this);
+            return;
+        }
+
+        // Calculate the maximum possible size needed for the result
+        // This is a worst-case estimate where every character is replaced
+        std::size_t max_size = this->m_len + (replacement.size() - pattern.size()) * std::min(n, this->m_len / pattern.size());
+        string.reserve(max_size);
+
+        std::size_t pos = 0;
+        std::size_t count = 0;
+
+        while (pos < this->m_len && count < n)
+        {
+            const Option<std::size_t> found = this->find(pattern);
+            if (found.is_none())
+            {
+                break;
+            }
+
+            const auto found_idx = found.unwrap();
+            // Copy the part before the pattern
+            if (found_idx > pos)
+            {
+                string.push_str(str::from_bytes_unchecked(this->m_data + pos, found_idx - pos));
+            }
+
+            // Copy the replacement
+            string.push_str(replacement);
+
+            // Move to the next position after the pattern
+            pos = found_idx + pattern.size();
+            count++;
+        }
+
+        // Copy the remaining part of the string
+        if (pos < this->m_len)
+        {
+            string.push_str(str::from_bytes_unchecked(this->m_data + pos, this->m_len - pos));
+        }
+
+        return string;
+    }
 
     [[nodiscard]] constexpr auto rfind(const str& pattern) const noexcept -> Option<std::size_t>
     {
@@ -565,15 +649,31 @@ public:
      * @brief Converts ASCII uppercase characters to lowercase
      * @param string A String stores original str's data with ASCII uppercase characters converted to lowercase
      */
-    template<typename Alloc>
-    constexpr auto to_ascii_lowercase(raw::String<Alloc>& string) const -> void;
+    template<typename Alloc = std::allocator<std::byte>>
+    constexpr auto to_ascii_lowercase() const -> raw::String<Alloc>
+    {
+        auto string = raw::String<Alloc>();
+        // string.clear();
+        string.push_str(*this);
+        string.make_ascii_lowercase();
+
+        return string;
+    }
 
     /**
      * @brief Converts ASCII lowercase characters to uppercase
      * @param string A String stores original str's data with ASCII lowercase characters converted to uppercase
      */
-    template<typename Alloc>
-    constexpr auto to_ascii_uppercase(raw::String<Alloc>& string) const -> void;
+    template<typename Alloc = std::allocator<std::byte>>
+    constexpr auto to_ascii_uppercase() const -> raw::String<Alloc>
+    {
+        auto string = raw::String<Alloc>();
+        // string.clear();
+        string.push_str(*this);
+        string.make_ascii_uppercase();
+
+        return string;
+    }
 
     /**
      * @brief Returns a str with leading and trailing ASCII whitespace removed.
@@ -610,11 +710,7 @@ public:
                 break;
             }
 
-            if (!(codepoint == 0x20 ||
-                  codepoint == 0x09 ||
-                  codepoint == 0x0A ||
-                  codepoint == 0x0C ||
-                  codepoint == 0x0D))
+            if (!std::bit_cast<Char>(codepoint).is_ascii_whitespace())
             {
                 break;
             }
@@ -646,15 +742,14 @@ public:
                 break;
             }
 
-            if (!(codepoint == 0x20 ||
-                  codepoint == 0x09 ||
-                  codepoint == 0x0A ||
-                  codepoint == 0x0C ||
-                  codepoint == 0x0D))
-            {
-                last_non_ws = p;
-            }
             p += advance;
+
+            if (std::bit_cast<Char>(codepoint).is_ascii_whitespace())
+            {
+                continue;
+            }
+
+            last_non_ws = p;
         }
 
         return str(start, last_non_ws - start);
@@ -808,12 +903,12 @@ private:
         constexpr explicit Lines(const str& s) : s(s) {}
 
     public:
-        [[nodiscard]] constexpr auto begin() const noexcept -> LinesIter
+        [[nodiscard]] constexpr auto begin() noexcept -> LinesIter
         {
             return LinesIter(&this->s);
         }
 
-        [[nodiscard]] constexpr auto end() const noexcept -> LinesIter
+        [[nodiscard]] constexpr auto end() noexcept -> LinesIter
         {
             return LinesIter(nullptr);
         }
@@ -830,32 +925,31 @@ private:
             using reference = plain_str&;
 
             const str* s = nullptr;
-            const str* pattern;
+            plain_str pattern;
             plain_str span;
 
             constexpr explicit SplitIter() noexcept {}
 
-            constexpr SplitIter(const str* s, const str* pattern) noexcept : s(s), pattern(pattern)
+            constexpr SplitIter(const str* s, const plain_str& pattern) noexcept : s(s), pattern(pattern)
             {
                 if (s != nullptr)
                 {
-                    auto bytes = s->as_bytes();
                     // If pattern is empty, return the entire string
-                    if (pattern->m_len == 0)
+                    if (pattern.len == 0)
                     {
-                        span = plain_str(bytes.data(), bytes.size());
+                        span = plain_str(s->m_data, s->m_len);
                         return;
                     }
 
-                    auto ptr = std::search(this->s->m_data, this->s->m_data + this->s->m_len, this->pattern->m_data, this->pattern->m_data + this->pattern->m_len);
+                    auto ptr = std::search(this->s->m_data, this->s->m_data + this->s->m_len, this->pattern.data, this->pattern.data + this->pattern.len);
                     if (ptr != this->s->m_data + this->s->m_len)
                     {
                         const auto pos = ptr - this->s->m_data;
-                        this->span = plain_str(bytes.data(), std::size_t(pos));
+                        this->span = plain_str(s->m_data, std::size_t(pos));
                     }
                     else
                     {
-                        span = plain_str(bytes.data(), bytes.size());
+                        span = plain_str(s->m_data, s->m_len);
                     }
                 }
             }
@@ -877,24 +971,23 @@ private:
                     return *this;
                 }
 
-                auto bytes = this->s->as_bytes();
-                std::size_t start = span.data - bytes.data() + span.len;
+                std::size_t start = span.data - this->s->m_data + span.len;
 
                 // Skip the delimiter
-                start += pattern->m_len;
+                start += pattern.len;
 
-                // If we've reached the end after skipping delimiter, end iteration
-                if (start >= bytes.size())
+                // If reached the end after skipping delimiter, end iteration
+                if (start > this->s->m_len)
                 {
                     this->s = nullptr;
-                    this->pattern = nullptr;
+                    this->span.len = 0;
                     return *this;
                 }
 
                 // Find the next split point
-                const auto ptr = std::search(this->s->m_data + start, this->s->m_data + this->s->m_len, this->pattern->m_data, this->pattern->m_data + this->pattern->m_len);
+                const auto ptr = std::search(this->s->m_data + start, this->s->m_data + this->s->m_len, this->pattern.data, this->pattern.data + this->pattern.len);
                 const auto pos = ptr - this->s->m_data;
-                this->span = plain_str(bytes.data() + start, pos - start);
+                this->span = plain_str(this->s->m_data + start, pos - start);
 
                 return *this;
             }
@@ -914,20 +1007,20 @@ private:
 
     public:
         const str& s;
-        const str& pattern;
+        const plain_str pattern;
 
     public:
-        constexpr Split(const str& s, const str& pattern) : s(s), pattern(pattern) {}
+        constexpr Split(const str& s, const plain_str& pattern) : s(s), pattern(pattern) {}
 
     public:
-        [[nodiscard]] constexpr auto begin() const noexcept -> SplitIter
+        [[nodiscard]] constexpr auto begin() noexcept -> SplitIter
         {
-            return SplitIter(&this->s, &this->pattern);
+            return SplitIter(&this->s, this->pattern);
         }
 
-        [[nodiscard]] constexpr auto end() const noexcept -> SplitIter
+        [[nodiscard]] constexpr auto end() noexcept -> SplitIter
         {
-            return SplitIter(nullptr, nullptr);
+            return SplitIter(nullptr, this->pattern);
         }
     };
 
@@ -957,11 +1050,7 @@ private:
                             &codepoint
                         );
 
-                        if (!(codepoint == 0x20 ||
-                            codepoint == 0x09 ||
-                            codepoint == 0x0A ||
-                            codepoint == 0x0C ||
-                            codepoint == 0x0D))
+                        if (!std::bit_cast<Char>(codepoint).is_ascii_whitespace())
                         {
                             break;
                         }
@@ -987,11 +1076,7 @@ private:
                         &codepoint
                     );
 
-                    if (!(codepoint == 0x20 ||
-                        codepoint == 0x09 ||
-                        codepoint == 0x0A ||
-                        codepoint == 0x0C ||
-                        codepoint == 0x0D))
+                    if (!std::bit_cast<Char>(codepoint).is_ascii_whitespace())
                     {
                         break;
                     }
@@ -1073,7 +1158,18 @@ public:
      */
     [[nodiscard]] constexpr auto split(const str& pattern) const noexcept -> Split
     {
-        return Split(*this, pattern);
+        return Split(*this, plain_str(pattern.m_data, pattern.m_len));
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by the given pattern
+     * @param pattern The pattern to split on
+     * @return A Split iterator that yields each part of the split string
+     */
+    template<typename Alloc>
+    [[nodiscard]] constexpr auto split(const raw::String<Alloc>& pattern) const noexcept -> Split
+    {
+        return Split(*this, plain_str(pattern.m_data, pattern.m_len));
     }
 
     /**
@@ -1084,7 +1180,8 @@ public:
      */
     [[nodiscard]] constexpr auto split(const char* pattern) const noexcept -> Split
     {
-        return Split(*this, str::from(pattern).expect("Invalid UTF-8 sequence while calling str::split#pattern"));
+        const auto s = str::from(pattern).expect("Invalid UTF-8 sequence while calling str::split#pattern");
+        return Split(*this, plain_str(s.m_data, s.m_len));
     }
 };
 
@@ -1102,23 +1199,15 @@ struct String
     friend struct crab_cpp::str;
 
 private:
-    struct StrProxy
-    {
-        str value;
-
-        constexpr explicit StrProxy(const str& s) noexcept : value(s) {}
-        constexpr auto operator->() const noexcept -> const str* { return &value; }
-    };
-
-    compressed_pair<Alloc, pointer> m_alloc_and_data;
+    pointer m_data;
     std::size_t m_len = 0;
-    std::size_t m_capacity = 0;
+    compressed_pair<Alloc, size_t> m_alloc_and_capacity;
 
     /**
      * @brief Private constructor for internal use
      */
     String(const Alloc& alloc, pointer data, std::size_t len, std::size_t capacity) noexcept
-        : m_alloc_and_data(alloc, data), m_len(len), m_capacity(capacity) {}
+        : m_data(data), m_len(len), m_alloc_and_capacity(alloc, capacity) {}
 
     /**
      * @brief Allocates memory for the string
@@ -1128,24 +1217,24 @@ private:
     {
         if (capacity == 0)
         {
-            this->m_alloc_and_data.second = nullptr;
-            this->m_capacity = 0;
+            this->m_data = nullptr;
+            this->m_alloc_and_capacity.second= 0;
             return;
         }
 
         // Add 1 to capacity for null terminator
-        this->m_alloc_and_data.second = std::allocator_traits<Alloc>::allocate(
-            this->m_alloc_and_data.first(),
+        this->m_data = std::allocator_traits<Alloc>::allocate(
+            this->m_alloc_and_capacity.first(),
             capacity + 1
         );
-        this->m_capacity = capacity;
+        this->m_alloc_and_capacity.second= capacity;
         // Add null terminator
-        this->m_alloc_and_data.second[0] = std::byte{0};
+        this->m_data[0] = std::byte{0};
     }
 
 // constructors
 public:
-    constexpr explicit String(const Alloc& alloc = Alloc()) noexcept : m_alloc_and_data(alloc, nullptr), m_len(0), m_capacity(0) {}
+    constexpr explicit String(const Alloc& alloc = Alloc()) noexcept : m_data(nullptr), m_len(0), m_alloc_and_capacity(alloc, 0) {}
 
     constexpr String(const str& str, const Alloc& alloc = Alloc()) : String(alloc, str.data(), str.size(), str.size()) {}
 
@@ -1156,7 +1245,7 @@ public:
      * @param alloc The allocator to use
      * @return A Result containing either a String or a FromUtf8Error
      */
-    [[nodiscard]] static auto from_raw_parts(const char* str, std::size_t len, const Alloc& alloc = Alloc()) noexcept -> Result<String, FromUtf8Error>
+    [[nodiscard]] static auto from_raw_parts(const char* str, std::size_t len, const Alloc& alloc = Alloc()) -> Result<String, FromUtf8Error>
     {
         auto alloc_copy = alloc;
 
@@ -1173,6 +1262,7 @@ public:
 
         pointer data = std::allocator_traits<Alloc>::allocate(alloc_copy, len);
         std::copy(str, str + len, std::bit_cast<char*>(data));
+
         return String(alloc_copy, data, len, len);
     }
 
@@ -1182,45 +1272,42 @@ public:
      * @param alloc The allocator to use
      * @return A Result containing either a String or a FromUtf8Error
      */
-    [[nodiscard]] static auto from(const char* str, const Alloc& alloc = Alloc()) noexcept -> Result<String, FromUtf8Error>
+    [[nodiscard]] static auto from(const char* str, const Alloc& alloc = Alloc()) -> Result<String, FromUtf8Error>
     {
         return String::from_raw_parts(str, std::strlen(str), alloc);
     }
 
     String(const String& other)
-        : m_alloc_and_data(
-            std::allocator_traits<Alloc>::select_on_container_copy_construction(other.m_alloc_and_data.first()),
-            nullptr
-        )
-        , m_len(0), m_capacity(0)
+        : m_data(nullptr)
+        , m_len(0), m_alloc_and_capacity(std::allocator_traits<Alloc>::select_on_container_copy_construction(other.m_alloc_and_capacity.first()), 0)
     {
         if (other.m_len > 0)
         {
             this->allocate(other.m_len);
-            std::copy(other.m_alloc_and_data.second,
-                     other.m_alloc_and_data.second + other.m_len,
-                     m_alloc_and_data.second);
+            std::copy(other.m_data,
+                     other.m_data + other.m_len,
+                     m_data);
 
             this->m_len = other.m_len;
         }
     }
 
     String(String&& other) noexcept
-        : m_alloc_and_data(std::move(other.m_alloc_and_data)), m_len(other.m_len), m_capacity(other.m_capacity)
+        : m_data(other.m_data), m_len(other.m_len), m_alloc_and_capacity(std::move(other.m_alloc_and_capacity))
     {
-        other.m_alloc_and_data.second = nullptr;
+        other.m_data = nullptr;
         other.m_len = 0;
-        other.m_capacity = 0;
+        other.m_alloc_and_capacity.second= 0;
     }
 
     ~String()
     {
-        if (this->m_alloc_and_data.second)
+        if (this->m_data)
         {
             std::allocator_traits<Alloc>::deallocate(
-                this->m_alloc_and_data.first(),
-                this->m_alloc_and_data.second,
-                this->m_capacity + 1
+                this->m_alloc_and_capacity.first(),
+                this->m_data,
+                this->m_alloc_and_capacity.second+ 1
             );
         }
     }
@@ -1234,7 +1321,7 @@ public:
     [[nodiscard]] constexpr auto as_bytes() const noexcept -> std::span<const std::byte>
     {
         return std::span<const std::byte>(
-            reinterpret_cast<const std::byte*>(this->m_alloc_and_data.second),
+            reinterpret_cast<const std::byte*>(this->m_data),
         this->m_len
         );
     }
@@ -1245,7 +1332,7 @@ public:
      */
     [[nodiscard]] constexpr auto as_raw() const noexcept -> const char*
     {
-        return reinterpret_cast<const char*>(this->m_alloc_and_data.second);
+        return reinterpret_cast<const char*>(this->m_data);
     }
 
     /**
@@ -1254,7 +1341,7 @@ public:
      */
     [[nodiscard]] constexpr auto capacity() const noexcept -> std::size_t
     {
-        return this->m_capacity;
+        return this->m_alloc_and_capacity.second;
     }
 
     /**
@@ -1270,7 +1357,7 @@ public:
      */
     [[nodiscard]] constexpr auto data() const noexcept -> const std::byte*
     {
-        return this->m_alloc_and_data.second;
+        return this->m_data;
     }
 
     /**
@@ -1278,7 +1365,7 @@ public:
      */
     [[nodiscard]] constexpr auto data() noexcept -> std::byte*
     {
-        return this->m_alloc_and_data.second;
+        return this->m_data;
     }
 
     /**
@@ -1293,14 +1380,14 @@ public:
         while (pos < this->m_len)
         {
             utf8proc_ssize_t advance = utf8proc_iterate(
-                reinterpret_cast<const utf8proc_uint8_t*>(this->m_alloc_and_data.second + pos),
+                reinterpret_cast<const utf8proc_uint8_t*>(this->m_data + pos),
                 this->m_len - pos,
                 &codepoint
             );
 
             if (codepoint >= 65 && codepoint <= 90)
             {
-                this->m_alloc_and_data.second[pos] = static_cast<std::byte>(codepoint + 32);
+                this->m_data[pos] = static_cast<std::byte>(codepoint + 32);
             }
 
             pos += advance;
@@ -1319,14 +1406,14 @@ public:
         while (pos < this->m_len)
         {
             utf8proc_ssize_t advance = utf8proc_iterate(
-                reinterpret_cast<const utf8proc_uint8_t*>(this->m_alloc_and_data.second + pos),
+                reinterpret_cast<const utf8proc_uint8_t*>(this->m_data + pos),
                 this->m_len - pos,
                 &codepoint
             );
 
             if (codepoint >= 97 && codepoint <= 122)
             {
-                this->m_alloc_and_data.second[pos] = static_cast<std::byte>(codepoint - 32);
+                this->m_data[pos] = static_cast<std::byte>(codepoint - 32);
             }
 
             pos += advance;
@@ -1349,40 +1436,40 @@ public:
     auto reserve(std::size_t additional) -> void
     {
         const std::size_t new_capacity = this->m_len + additional;
-        if (new_capacity <= this->m_capacity)
+        if (new_capacity <= this->m_alloc_and_capacity.second)
         {
             return;
         }
 
         // Allocate new memory (add 1 for null terminator)
         pointer new_data = std::allocator_traits<Alloc>::allocate(
-            this->m_alloc_and_data.first(),
+            this->m_alloc_and_capacity.first(),
             new_capacity + 1
         );
 
         // Copy existing data
         if (this->m_len > 0)
         {
-            std::copy(this->m_alloc_and_data.second,
-                    this->m_alloc_and_data.second + this->m_len,
+            std::copy(this->m_data,
+                    this->m_data + this->m_len,
                     new_data);
         }
         // Add null terminator
         new_data[this->m_len] = std::byte{0};
 
         // Deallocate old memory
-        if (this->m_alloc_and_data.second != nullptr)
+        if (this->m_data != nullptr)
         {
             std::allocator_traits<Alloc>::deallocate(
-                this->m_alloc_and_data.first(),
-                this->m_alloc_and_data.second,
-                this->m_capacity + 1
+                this->m_alloc_and_capacity.first(),
+                this->m_data,
+                this->m_alloc_and_capacity.second+ 1
             );
         }
 
         // Update members
-        this->m_alloc_and_data.second = new_data;
-        this->m_capacity = new_capacity;
+        this->m_data = new_data;
+        this->m_alloc_and_capacity.second= new_capacity;
     }
 
     /**
@@ -1404,15 +1491,15 @@ public:
         }
 
         const std::size_t new_len = this->m_len + static_cast<std::size_t>(len);
-        if (new_len > this->m_capacity)
+        if (new_len > this->m_alloc_and_capacity.second)
         {
-            this->reserve(new_len - this->m_capacity);
+            this->reserve(new_len - this->m_alloc_and_capacity.second);
         }
 
-        std::copy(utf8, utf8 + len, this->m_alloc_and_data.second + this->m_len);
+        std::copy(utf8, utf8 + len, this->m_data + this->m_len);
         this->m_len = new_len;
         // Add null terminator
-        this->m_alloc_and_data.second[this->m_len] = std::byte{0};
+        this->m_data[this->m_len] = std::byte{0};
     }
 
     /**
@@ -1427,15 +1514,15 @@ public:
         }
 
         const std::size_t new_len = this->m_len + str.size();
-        if (new_len > this->m_capacity)
+        if (new_len > this->m_alloc_and_capacity.second)
         {
-            this->reserve(new_len - this->m_capacity);
+            this->reserve(new_len - this->m_alloc_and_capacity.second);
         }
 
-        std::copy(str.data(), str.data() + str.size(), this->m_alloc_and_data.second + this->m_len);
+        std::copy(str.data(), str.data() + str.size(), this->m_data + this->m_len);
         this->m_len = new_len;
         // Add null terminator
-        this->m_alloc_and_data.second[this->m_len] = std::byte{0};
+        this->m_data[this->m_len] = std::byte{0};
     }
 
     /**
@@ -1444,7 +1531,7 @@ public:
      */
     auto push_str(const char* str) -> void
     {
-        this->push_str(str::from(str).expect("Failed to convert C-string to str while calling String::push_str"));
+        this->push_str(str::from(str).expect("Invalid UTF-8 sequence while calling String::push_str"));
     }
 
     /**
@@ -1461,27 +1548,27 @@ public:
         }
 
         // Verify that 'at' is on a UTF-8 code point boundary
-        if (!is_valid_utf8(this->m_alloc_and_data.second, at) ||
-            !is_valid_utf8(this->m_alloc_and_data.second + at, this->m_len - at))
+        if (!is_valid_utf8(this->m_data, at) ||
+            !is_valid_utf8(this->m_data + at, this->m_len - at))
         {
             panic("Split index not on UTF-8 code point boundary");
         }
 
         // Create new string with the second part
-        String result(this->m_alloc_and_data.first(), nullptr, 0, 0);
+        String result(this->m_alloc_and_capacity.first(), nullptr, 0, 0);
         result.reserve(this->m_len - at);
 
         // Copy the bytes [at, len) to the new string
-        std::copy(this->m_alloc_and_data.second + at,
-                 this->m_alloc_and_data.second + this->m_len,
-                 result.m_alloc_and_data.second);
+        std::copy(this->m_data + at,
+                 this->m_data + this->m_len,
+                 result.m_data);
         result.m_len = this->m_len - at;
         // Add null terminator to the new string
-        result.m_alloc_and_data.second[result.m_len] = std::byte{0};
+        result.m_data[result.m_len] = std::byte{0};
 
         // Update this string's length and add null terminator
         this->m_len = at;
-        this->m_alloc_and_data.second[this->m_len] = std::byte{0};
+        this->m_data[this->m_len] = std::byte{0};
 
         return result;
     }
@@ -1492,7 +1579,7 @@ public:
      */
     [[nodiscard]] auto to_std_string() const -> std::string
     {
-        return std::string(std::bit_cast<const char*>(this->m_alloc_and_data.second), this->m_len);
+        return std::string(std::bit_cast<const char*>(this->m_data), this->m_len);
     }
 
     /**
@@ -1509,13 +1596,13 @@ public:
             return;
         }
 
-        if (!is_valid_utf8(this->m_alloc_and_data.second, new_len))
+        if (!is_valid_utf8(this->m_data, new_len))
         {
             panic("Invalid UTF-8 sequence while calling String::truncate");
         }
 
         this->m_len = new_len;
-        this->m_alloc_and_data.second[this->m_len] = std::byte{0};
+        this->m_data[this->m_len] = std::byte{0};
     }
 
     /**
@@ -1531,7 +1618,7 @@ public:
 
         // Find the start of the last UTF-8 sequence by scanning backwards
         std::size_t start = this->m_len - 1;
-        while (start > 0 && (this->m_alloc_and_data.second[start] & std::byte{0xC0}) == std::byte{0x80})
+        while (start > 0 && (this->m_data[start] & std::byte{0xC0}) == std::byte{0x80})
         {
             start -= 1;
         }
@@ -1539,7 +1626,7 @@ public:
         // Decode the UTF-8 sequence
         utf8proc_int32_t codepoint;
         utf8proc_iterate(
-            reinterpret_cast<const utf8proc_uint8_t*>(this->m_alloc_and_data.second + start),
+            reinterpret_cast<const utf8proc_uint8_t*>(this->m_data + start),
             this->m_len - start,
             &codepoint
         );
@@ -1547,21 +1634,21 @@ public:
         // Update string length
         this->m_len = start;
         // Add null terminator at new end
-        this->m_alloc_and_data.second[this->m_len] = std::byte{0};
+        this->m_data[this->m_len] = std::byte{0};
 
         return Char(static_cast<std::uint32_t>(codepoint));
     }
 
 //operators
 public:
-    [[nodiscard]] auto operator->() noexcept -> StrProxy
+    [[nodiscard]] auto operator->() noexcept -> str*
     {
-        return StrProxy(str::from_bytes_unchecked(this->m_alloc_and_data.second, this->m_len));
+        return std::bit_cast<str*>(this);
     }
 
-    [[nodiscard]] auto operator->() const noexcept -> StrProxy
+    [[nodiscard]] auto operator->() const noexcept -> const str*
     {
-        return StrProxy(str::from_bytes_unchecked(this->m_alloc_and_data.second, this->m_len));
+        return std::bit_cast<const str*>(this);
     }
 
     /**
@@ -1594,7 +1681,7 @@ public:
             return this->m_len <=> other.m_len;
         }
 
-        const int result = std::equal(this->m_alloc_and_data.second, this->m_alloc_and_data.second + min_len, other.m_alloc_and_data.second);
+        const int result = std::equal(this->m_data, this->m_data + min_len, other.m_data);
         if (result != 0)
         {
             return result <=> 0;
@@ -1610,110 +1697,13 @@ public:
             return false;
         }
 
-        return std::equal(this->m_alloc_and_data.second, this->m_alloc_and_data.second + this->m_len, other.m_alloc_and_data.second);
+        return std::equal(this->m_data, this->m_data + this->m_len, other.m_data);
     }
 };
 
 }
 
 using String = raw::String<std::allocator<std::byte>>;
-
-template<typename Alloc>
-constexpr auto str::repeat(size_t n, raw::String<Alloc>& string) const -> void
-{
-    if (n > std::numeric_limits<std::size_t>::max() / this->m_len)
-    {
-        panic("Repeat times overflow");
-    }
-
-    string.clear();
-    string.reserve(this->m_len * n);
-
-    for (size_t i = 0; i < n; i += 1)
-    {
-        string.push_str(*this);
-    }
-}
-
-template<typename Alloc>
-constexpr auto str::replace(const str& pattern, const str& replacement, raw::String<Alloc>& string) const noexcept -> void
-{
-    this->replace_n(pattern, replacement, string, std::numeric_limits<std::size_t>::max());
-}
-
-template<typename Alloc>
-constexpr auto str::replace(const char* pattern, const char* replacement, raw::String<Alloc>& string) const noexcept -> void
-{
-    this->replace(str::from(pattern).expect("Invalid UTF-8 sequence while calling String::replace#pattern"),
-        str::from(replacement).expect("Invalid UTF-8 sequence while calling String::replace#replacement"), string);
-}
-
-template<typename Alloc>
-constexpr auto str::replace_n(const str& pattern, const str& replacement, raw::String<Alloc>& string, std::size_t n) const noexcept -> void
-{
-    string.clear();
-
-    if (pattern.empty())
-    {
-        string.push_str(*this);
-        return;
-    }
-
-    // Calculate the maximum possible size needed for the result
-    // This is a worst-case estimate where every character is replaced
-    std::size_t max_size = this->m_len + (replacement.size() - pattern.size()) * std::min(n, this->m_len / pattern.size());
-    string.reserve(max_size);
-
-    std::size_t pos = 0;
-    std::size_t count = 0;
-
-    while (pos < this->m_len && count < n)
-    {
-        const Option<std::size_t> found = this->find(pattern);
-        if (found.is_none())
-        {
-            break;
-        }
-
-        const auto found_idx = found.unwrap();
-        // Copy the part before the pattern
-        if (found_idx > pos)
-        {
-            string.push_str(str::from_bytes_unchecked(this->m_data + pos, found_idx - pos));
-        }
-
-        // Copy the replacement
-        string.push_str(replacement);
-
-        // Move to the next position after the pattern
-        pos = found_idx + pattern.size();
-        count++;
-    }
-
-    // Copy the remaining part of the string
-    if (pos < this->m_len)
-    {
-        string.push_str(str::from_bytes_unchecked(this->m_data + pos, this->m_len - pos));
-    }
-}
-
-template<typename Alloc>
-constexpr auto str::to_ascii_lowercase(raw::String<Alloc>& string) const -> void
-{
-    string.clear();
-    string.push_str(*this);
-
-    string.make_ascii_lowercase();
-}
-
-template<typename Alloc>
-constexpr auto str::to_ascii_uppercase(raw::String<Alloc>& string) const -> void
-{
-    string.clear();
-    string.push_str(*this);
-
-    string.make_ascii_uppercase();
-}
 
 template<typename Alloc>
 [[nodiscard]] constexpr auto operator==(const raw::String<Alloc>& lhs, const str& rhs) noexcept -> bool
