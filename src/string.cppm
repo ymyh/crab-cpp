@@ -829,7 +829,7 @@ private:
                 }
 
                 auto bytes = this->s->as_bytes();
-                std::size_t start = span.data - bytes.data() + span.len + skip;
+                std::size_t start = span.data - bytes.data() + this->span.len + this->skip;
 
                 // If we're at or past the end, mark as finished
                 if (start >= bytes.size())
@@ -842,12 +842,13 @@ private:
                 // Skip the line ending we found in the previous iteration
                 if (bytes[start] == std::byte{'\n'})
                 {
-                    start++;
+                    this->skip = 1;
                 }
                 else if (bytes[start] == std::byte{'\r'} && start + 1 < bytes.size() && bytes[start + 1] == std::byte{'\n'})
                 {
-                    start += 2;
+                    this->skip = 2;
                 }
+                start += this->skip;
 
                 // If we're at the end after skipping line ending, mark as finished
                 if (start >= bytes.size())
@@ -1236,7 +1237,10 @@ private:
 public:
     constexpr explicit String(const Alloc& alloc = Alloc()) noexcept : m_data(nullptr), m_len(0), m_alloc_and_capacity(alloc, 0) {}
 
-    constexpr String(const str& str, const Alloc& alloc = Alloc()) : String(alloc, str.data(), str.size(), str.size()) {}
+    constexpr String(const str& str, const Alloc& alloc = Alloc()) : String(alloc)
+    {
+        (*this) += str;
+    }
 
     /**
      * @brief Creates a string from a UTF-8 string
@@ -1334,6 +1338,15 @@ public:
     {
         return reinterpret_cast<const char*>(this->m_data);
     }
+
+    /**
+     * @brief Returns a byte slice of this String's contents
+     * @return A span containing the string's bytes
+     */
+     [[nodiscard]] constexpr auto as_str() const noexcept -> const str*
+     {
+         return reinterpret_cast<const str*>(this);
+     }
 
     /**
      * @brief Returns the current capacity of the buffer in bytes
@@ -1508,21 +1521,7 @@ public:
      */
     auto push_str(const str& str) -> void
     {
-        if (str.empty())
-        {
-            return;
-        }
-
-        const std::size_t new_len = this->m_len + str.size();
-        if (new_len > this->m_alloc_and_capacity.second)
-        {
-            this->reserve(new_len - this->m_alloc_and_capacity.second);
-        }
-
-        std::copy(str.data(), str.data() + str.size(), this->m_data + this->m_len);
-        this->m_len = new_len;
-        // Add null terminator
-        this->m_data[this->m_len] = std::byte{0};
+        (*this) += str;
     }
 
     /**
@@ -1656,9 +1655,34 @@ public:
      * @param str The str to append
      * @return A reference to this String
      */
+    auto operator+=(const String& str) -> String&
+    {
+        return (*this) += str.as_str();
+    }
+
+    /**
+     * @brief Appends a str to this String using the += operator
+     * @param str The str to append
+     * @return A reference to this String
+     */
     auto operator+=(const str& str) -> String&
     {
-        this->push_str(str);
+        if (str.empty())
+        {
+            return *this;
+        }
+
+        const std::size_t new_len = this->m_len + str.size();
+        if (new_len > this->m_alloc_and_capacity.second)
+        {
+            this->reserve(new_len - this->m_alloc_and_capacity.second);
+        }
+
+        std::copy(str.data(), str.data() + str.size(), this->m_data + this->m_len);
+        this->m_len = new_len;
+        // Add null terminator
+        this->m_data[this->m_len] = std::byte{0};
+
         return *this;
     }
 
@@ -1669,8 +1693,27 @@ public:
      */
     auto operator+=(const char* str) -> String&
     {
-        this->push_str(str);
-        return *this;
+        return (*this) += str::from(str).expect("Invalid UTF-8 sequence while calling String::operator+=");
+    }
+
+    auto operator+(const String& str) -> String
+    {
+        return (*this) + str.as_str();
+    }
+
+    auto operator+(const str& str) -> String
+    {
+        auto string = String();
+        string.reserve(this->m_len + str.size());
+        string += *this;
+        string += str;
+
+        return string;
+    }
+
+    auto operator+(const char* str) -> String
+    {
+        return (*this) + str::from(str).expect("Invalid UTF-8 sequence while calling String::operator+=");
     }
 
     [[nodiscard]] constexpr auto operator<=>(const String& other) const noexcept -> std::strong_ordering
@@ -1795,3 +1838,30 @@ auto operator<<(std::ostream& os, const crab_cpp::raw::String<Alloc>& str) -> st
     os << std::string_view(reinterpret_cast<const char*>(str.data()), str.size());
     return os;
 }
+
+export template<>
+struct std::hash<crab_cpp::Char>
+{
+    auto operator()(const crab_cpp::Char& ch) const noexcept -> size_t
+    {
+		return std::hash<std::uint32_t>{}(ch.code_point());
+	}
+};
+
+export template<>
+struct std::hash<crab_cpp::str>
+{
+    auto operator()(const crab_cpp::str& str) const noexcept -> size_t
+    {
+		return std::hash<std::string_view>{}(std::string_view(str.as_raw(), str.size()));
+	}
+};
+
+export template<typename Alloc>
+struct std::hash<crab_cpp::raw::String<Alloc>>
+{
+    auto operator()(const crab_cpp::raw::String<Alloc>& str) const noexcept -> size_t
+    {
+		return std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char*>(str.data()), str.size()));
+	}
+};
