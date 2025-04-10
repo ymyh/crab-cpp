@@ -1242,6 +1242,22 @@ public:
         (*this) += str;
     }
 
+    // constexpr String(const String& other) : String()
+    // {
+    //     (*this) += other;
+    // }
+
+    // constexpr String(String&& other) : String()
+    // {
+    //     this->m_data = other.m_data;
+    //     this->m_len = other.m_len;
+    //     this->m_alloc_and_capacity = std::move(other.m_alloc_and_capacity);
+
+    //     other.m_data = nullptr;
+    //     other.m_len = 0;
+    //     other.m_alloc_and_capacity.second= 0;
+    // }
+
     /**
      * @brief Creates a string from a UTF-8 string
      * @param str The input string
@@ -1343,10 +1359,10 @@ public:
      * @brief Returns a byte slice of this String's contents
      * @return A span containing the string's bytes
      */
-     [[nodiscard]] constexpr auto as_str() const noexcept -> const str*
-     {
-         return reinterpret_cast<const str*>(this);
-     }
+    [[nodiscard]] constexpr auto as_str() const noexcept -> const str&
+    {
+        return *(reinterpret_cast<const str*>(this));
+    }
 
     /**
      * @brief Returns the current capacity of the buffer in bytes
@@ -1491,28 +1507,7 @@ public:
      */
     auto push(Char ch) -> void
     {
-        // Convert Unicode scalar value to UTF-8
-        utf8proc_uint8_t utf8[4];
-        utf8proc_ssize_t len = utf8proc_encode_char(
-            static_cast<utf8proc_int32_t>(ch.code_point()),
-            utf8
-        );
-
-        if (len < 0)
-        {
-            panic("Failed to encode Unicode scalar value to UTF-8");
-        }
-
-        const std::size_t new_len = this->m_len + static_cast<std::size_t>(len);
-        if (new_len > this->m_alloc_and_capacity.second)
-        {
-            this->reserve(new_len - this->m_alloc_and_capacity.second);
-        }
-
-        std::copy(utf8, utf8 + len, this->m_data + this->m_len);
-        this->m_len = new_len;
-        // Add null terminator
-        this->m_data[this->m_len] = std::byte{0};
+        (*this) += ch;
     }
 
     /**
@@ -1648,6 +1643,47 @@ public:
     [[nodiscard]] auto operator->() const noexcept -> const str*
     {
         return std::bit_cast<const str*>(this);
+    }
+
+    auto operator=(const String& other) -> String&
+    {
+        this->clear();
+        (*this) += other;
+
+        return *this;
+    }
+
+    /**
+     * @brief Appends the given Char to the end of this String.
+     * @param ch The Char to append
+     * @return A reference to this String
+     */
+    auto operator+=(const Char ch) -> String&
+    {
+        // Convert Unicode scalar value to UTF-8
+        utf8proc_uint8_t utf8[4];
+        utf8proc_ssize_t len = utf8proc_encode_char(
+            static_cast<utf8proc_int32_t>(ch.code_point()),
+            utf8
+        );
+
+        if (len < 0)
+        {
+            panic("Failed to encode Unicode scalar value to UTF-8");
+        }
+
+        const std::size_t new_len = this->m_len + static_cast<std::size_t>(len);
+        if (new_len > this->m_alloc_and_capacity.second)
+        {
+            this->reserve(new_len - this->m_alloc_and_capacity.second);
+        }
+
+        std::copy(utf8, utf8 + len, this->m_data + this->m_len);
+        this->m_len = new_len;
+        // Add null terminator
+        this->m_data[this->m_len] = std::byte{0};
+
+        return *this;
     }
 
     /**
