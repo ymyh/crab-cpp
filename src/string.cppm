@@ -53,13 +53,65 @@ struct plain_str
 
     explicit constexpr plain_str(const std::byte* data, size_t len) noexcept : data(data), len(len) {}
 
-    // constexpr plain_str(const plain_str& other) = default;
+public:
+    struct Iter
+    {
+        using iterator_category = std::forward_iterator_tag;
+        using difference_type = std::ptrdiff_t;
+        using value_type = std::byte;
+        using pointer = const std::byte*;
+        using reference = const std::byte&;
 
-    // constexpr plain_str(plain_str&& other) = default;
+    public:
+        const std::byte *ptr = nullptr;
 
-    // [[nodiscard]] constexpr auto operator=(const plain_str& other) const noexcept -> plain_str& = default;
+    public:
+        explicit Iter() = default;
 
-    [[nodiscard]] constexpr auto operator<=>(const plain_str& other) const noexcept -> std::strong_ordering = default;
+        explicit Iter(const std::byte* ptr) : ptr(ptr) {}
+
+    public:
+        constexpr auto operator++() noexcept -> Iter&
+        {
+            this->ptr += 1;
+            return *this;
+        }
+
+        constexpr auto operator++(int) noexcept -> Iter
+        {
+            auto temp = *this;
+            this->ptr += 1;
+
+            return temp;
+        }
+
+        auto operator*() const -> const std::byte&
+        {
+            return *const_cast<std::byte*>(this->ptr);
+        }
+
+        auto operator->() const -> const std::byte*
+        {
+            return const_cast<std::byte*>(this->ptr);
+        }
+
+        constexpr auto operator<=>(const Iter&) const noexcept -> std::strong_ordering = default;
+    };
+
+    constexpr auto begin() noexcept -> Iter
+    {
+        return Iter(this->data);
+    }
+
+    constexpr auto end() noexcept -> Iter
+    {
+        return Iter(this->data + this->len);
+    }
+
+    [[nodiscard]] constexpr auto operator==(const plain_str& other) const noexcept -> bool = default;
+
+    using iterator = Iter;
+    using const_iterator = Iter;
 };
 
 export namespace crab_cpp
@@ -277,6 +329,17 @@ public:
      * @param s The plain_str to construct from
      */
     constexpr str(const plain_str& s) noexcept : m_data(s.data), m_len(s.len) {}
+
+public:
+    constexpr auto begin() const noexcept -> const std::byte*
+    {
+        return reinterpret_cast<const std::byte*>(this->m_data);
+    }
+
+    constexpr auto end() const noexcept -> const std::byte*
+    {
+        return reinterpret_cast<const std::byte*>(this->m_data + this->m_len);
+    }
 
     /**
      * @brief Creates a string view from a pointer and length
@@ -762,10 +825,10 @@ private:
         struct LinesIter
         {
             using iterator_category = std::forward_iterator_tag;
-            using value_type = str;
+            using value_type = plain_str;
             using difference_type = std::ptrdiff_t;
-            using pointer = str*;
-            using reference = str&;
+            using pointer = plain_str*;
+            using reference = plain_str&;
 
             const str* s = nullptr;
             plain_str span;
@@ -920,16 +983,16 @@ private:
         struct SplitIter
         {
             using iterator_category = std::forward_iterator_tag;
-            using value_type = plain_str;
             using difference_type = std::ptrdiff_t;
-            using pointer = plain_str*;
-            using reference = plain_str&;
+            using value_type = plain_str;
+            using pointer = const plain_str*;
+            using reference = const plain_str&;
 
             const str* s = nullptr;
             plain_str pattern;
             plain_str span;
 
-            constexpr explicit SplitIter() noexcept {}
+            constexpr SplitIter() noexcept {}
 
             constexpr SplitIter(const str* s, const plain_str& pattern) noexcept : s(s), pattern(pattern)
             {
@@ -955,12 +1018,22 @@ private:
                 }
             }
 
-            [[nodiscard]] constexpr auto operator*() const noexcept -> const plain_str&
+            [[nodiscard]] auto operator*() const noexcept -> const plain_str&
             {
                 return this->span;
             }
 
-            [[nodiscard]] constexpr auto operator->() const noexcept -> const plain_str*
+            [[nodiscard]] auto operator->() noexcept -> plain_str*
+            {
+                return &this->span;
+            }
+
+            [[nodiscard]] auto operator*() noexcept -> const plain_str&
+            {
+                return this->span;
+            }
+
+            [[nodiscard]] auto operator->() const noexcept -> const plain_str*
             {
                 return &this->span;
             }
@@ -1007,6 +1080,9 @@ private:
         };
 
     public:
+        using iterator = SplitIter;
+        using const_iterator = SplitIter;
+
         const str& s;
         const plain_str pattern;
 
@@ -1105,12 +1181,12 @@ private:
         constexpr SplitASCIIWhiteSpace(const str& s) : s(s) {}
 
     public:
-        [[nodiscard]] constexpr auto begin() const noexcept -> SplitASCIIWhiteSpaceIter
+        [[nodiscard]] constexpr auto begin() noexcept -> SplitASCIIWhiteSpaceIter
         {
             return SplitASCIIWhiteSpaceIter(&this->s);
         }
 
-        [[nodiscard]] constexpr auto end() const noexcept -> SplitASCIIWhiteSpaceIter
+        [[nodiscard]] constexpr auto end() noexcept -> SplitASCIIWhiteSpaceIter
         {
             return SplitASCIIWhiteSpaceIter(nullptr);
         }
@@ -1242,21 +1318,10 @@ public:
         (*this) += str;
     }
 
-    // constexpr String(const String& other) : String()
-    // {
-    //     (*this) += other;
-    // }
-
-    // constexpr String(String&& other) : String()
-    // {
-    //     this->m_data = other.m_data;
-    //     this->m_len = other.m_len;
-    //     this->m_alloc_and_capacity = std::move(other.m_alloc_and_capacity);
-
-    //     other.m_data = nullptr;
-    //     other.m_len = 0;
-    //     other.m_alloc_and_capacity.second= 0;
-    // }
+    constexpr String(const plain_str& str, const Alloc& alloc = Alloc()) : String(alloc)
+    {
+        (*this) += crab_cpp::str(str);
+    }
 
     /**
      * @brief Creates a string from a UTF-8 string
@@ -1301,15 +1366,16 @@ public:
         : m_data(nullptr)
         , m_len(0), m_alloc_and_capacity(std::allocator_traits<Alloc>::select_on_container_copy_construction(other.m_alloc_and_capacity.first()), 0)
     {
-        if (other.m_len > 0)
-        {
-            this->allocate(other.m_len);
-            std::copy(other.m_data,
-                     other.m_data + other.m_len,
-                     m_data);
+        // if (other.m_len > 0)
+        // {
+        //     this->allocate(other.m_len);
+        //     std::copy(other.m_data,
+        //              other.m_data + other.m_len,
+        //              m_data);
 
-            this->m_len = other.m_len;
-        }
+        //     this->m_len = other.m_len;
+        // }
+        (*this) += other;
     }
 
     String(String&& other) noexcept
