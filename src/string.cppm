@@ -51,7 +51,12 @@ struct plain_str
 
     explicit constexpr plain_str() noexcept = default;
 
+    constexpr plain_str(const plain_str&) = default;
+
     explicit constexpr plain_str(const std::byte* data, size_t len) noexcept : data(data), len(len) {}
+
+public:
+    auto operator=(const plain_str& other) noexcept -> plain_str& = default;
 
 public:
     struct Iter
@@ -98,12 +103,12 @@ public:
         constexpr auto operator<=>(const Iter&) const noexcept -> std::strong_ordering = default;
     };
 
-    constexpr auto begin() noexcept -> Iter
+    constexpr auto begin() const noexcept -> Iter
     {
         return Iter(this->data);
     }
 
-    constexpr auto end() noexcept -> Iter
+    constexpr auto end() const noexcept -> Iter
     {
         return Iter(this->data + this->len);
     }
@@ -329,6 +334,8 @@ public:
      * @param s The plain_str to construct from
      */
     constexpr str(const plain_str& s) noexcept : m_data(s.data), m_len(s.len) {}
+
+    constexpr str(char ch) noexcept {}
 
 public:
     constexpr auto begin() const noexcept -> const std::byte*
@@ -1018,24 +1025,24 @@ private:
                 }
             }
 
-            [[nodiscard]] auto operator*() const noexcept -> const plain_str&
-            {
-                return this->span;
-            }
+            // [[nodiscard]] auto operator->() noexcept -> plain_str*
+            // {
+            //     return &this->span;
+            // }
 
-            [[nodiscard]] auto operator->() noexcept -> plain_str*
-            {
-                return &this->span;
-            }
-
-            [[nodiscard]] auto operator*() noexcept -> const plain_str&
-            {
-                return this->span;
-            }
+            // [[nodiscard]] auto operator*() noexcept -> plain_str&
+            // {
+            //     return this->span;
+            // }
 
             [[nodiscard]] auto operator->() const noexcept -> const plain_str*
             {
-                return &this->span;
+                return const_cast<const plain_str*>(&this->span);
+            }
+
+            [[nodiscard]] auto operator*() const noexcept -> const plain_str&
+            {
+                return const_cast<const plain_str&>(this->span);
             }
 
             constexpr auto operator++() noexcept -> SplitIter&
@@ -1083,16 +1090,25 @@ private:
         using iterator = SplitIter;
         using const_iterator = SplitIter;
 
-        const str& s;
+        const str* s;
         const plain_str pattern;
 
     public:
-        constexpr Split(const str& s, const plain_str& pattern) : s(s), pattern(pattern) {}
+        constexpr explicit Split() = default;
+
+        constexpr Split(const str& s, const plain_str& pattern) : s(&s), pattern(pattern) {}
+
+    public:
+        auto operator=(const Split& other) noexcept -> Split&
+        {
+            std::memcpy(this, &other, sizeof(Split));
+            return *this;
+        }
 
     public:
         [[nodiscard]] constexpr auto begin() noexcept -> SplitIter
         {
-            return SplitIter(&this->s, this->pattern);
+            return SplitIter(this->s, this->pattern);
         }
 
         [[nodiscard]] constexpr auto end() noexcept -> SplitIter
@@ -1261,6 +1277,20 @@ public:
         return Split(*this, plain_str(s.m_data, s.m_len));
     }
 };
+
+namespace strings
+{
+    constexpr auto join_with(char ch) -> decltype(auto)
+    {
+        return std::views::join_with(static_cast<std::byte>(ch));
+    }
+
+    constexpr auto join_with(const char* str) -> decltype(auto)
+    {
+        const auto s = str::from(str).expect("Invalid UTF-8 sequence while calling strings::join_with#str");
+        return std::views::join_with(s.as_bytes());
+    }
+}
 
 namespace raw
 {
