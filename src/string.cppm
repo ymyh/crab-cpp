@@ -628,26 +628,25 @@ public:
     template<typename Alloc = std::allocator<std::byte>>
     constexpr auto replace(const str& pattern, const str& replacement) const -> raw::String<Alloc>
     {
-        this->replace_n<Alloc>(pattern, replacement, std::numeric_limits<std::size_t>::max());
+        return this->replace_n<Alloc>(pattern, replacement, std::numeric_limits<std::size_t>::max());
     }
 
     template<typename Alloc = std::allocator<std::byte>>
     constexpr auto replace(const char* pattern, const char* replacement) const -> raw::String<Alloc>
     {
-        this->replace<Alloc>(str::from(pattern).expect("Invalid UTF-8 sequence while calling String::replace#pattern"),
-        str::from(replacement).expect("Invalid UTF-8 sequence while calling String::replace#replacement"));
+        return this->replace<Alloc>(str::from(pattern).expect("Invalid UTF-8 sequence while calling String::replace#pattern"),
+            str::from(replacement).expect("Invalid UTF-8 sequence while calling String::replace#replacement"));
     }
 
     template<typename Alloc = std::allocator<std::byte>>
     constexpr auto replace_n(const str& pattern, const str& replacement, std::size_t n) const -> raw::String<Alloc>
     {
         auto string = raw::String<Alloc>();
-        // string.clear();
 
         if (pattern.empty())
         {
             string.push_str(*this);
-            return;
+            return string;
         }
 
         // Calculate the maximum possible size needed for the result
@@ -1273,7 +1272,7 @@ public:
      */
     [[nodiscard]] constexpr auto split(const char* pattern) const noexcept -> Split
     {
-        const auto s = str::from(pattern).expect("Invalid UTF-8 sequence while calling str::split#pattern");
+        const auto s = str::from(pattern).ok().expect_take("Invalid UTF-8 sequence while calling str::split#pattern");
         return Split(*this, plain_str(s.m_data, s.m_len));
     }
 };
@@ -1289,6 +1288,17 @@ namespace strings
     {
         const auto s = str::from(str).expect("Invalid UTF-8 sequence while calling strings::join_with#str");
         return std::views::join_with(s.as_bytes());
+    }
+
+    constexpr auto join_with(const str& str) -> decltype(auto)
+    {
+        return std::views::join_with(str.as_bytes());
+    }
+
+    template<typename Alloc = std::allocator<std::byte>>
+    constexpr auto join_with(const raw::String<Alloc>& str) -> decltype(auto)
+    {
+        return std::views::join_with(str.as_bytes());
     }
 }
 
@@ -1306,7 +1316,7 @@ struct String
     friend struct crab_cpp::str;
 
 private:
-    pointer m_data;
+    pointer m_data = nullptr;
     std::size_t m_len = 0;
     compressed_pair<Alloc, size_t> m_alloc_and_capacity;
 
@@ -1325,7 +1335,7 @@ private:
         if (capacity == 0)
         {
             this->m_data = nullptr;
-            this->m_alloc_and_capacity.second= 0;
+            this->m_alloc_and_capacity.second = 0;
             return;
         }
 
@@ -1334,7 +1344,7 @@ private:
             this->m_alloc_and_capacity.first(),
             capacity + 1
         );
-        this->m_alloc_and_capacity.second= capacity;
+        this->m_alloc_and_capacity.second = capacity;
         // Add null terminator
         this->m_data[0] = std::byte{0};
     }
@@ -1353,6 +1363,35 @@ public:
         (*this) += crab_cpp::str(str);
     }
 
+    template<typename View>
+        requires std::ranges::view<std::remove_reference_t<View>> &&
+            std::same_as<std::byte, std::remove_cv_t<typename std::iterator_traits<std::ranges::iterator_t<View>>::value_type>>
+    constexpr String(View&& view, const Alloc& alloc = Alloc()) : String(alloc)
+    {
+        this->reserve(64);
+        auto begin = view.cbegin();
+
+        size_t i = 0;
+        for (; begin != view.cend(); i += 1)
+        {
+            this->m_data[i] = *begin;
+            ++begin;
+
+            if (i == this->m_alloc_and_capacity.second - 1)
+            {
+                this->m_len = i + 1;
+                this->reserve(this->m_alloc_and_capacity.second / 2);
+            }
+        }
+        this->m_len = i;
+        this->m_data[i + 1] = std::byte{0};
+
+        if (!is_valid_utf8(this->m_data, this->m_len))
+        {
+            panic("Invalid UTF-8 sequence encountered while calling String constructor");
+        }
+    }
+
     /**
      * @brief Creates a string from a UTF-8 string
      * @param str The input string
@@ -1364,7 +1403,7 @@ public:
     {
         auto alloc_copy = alloc;
 
-        if (!str || len == 0)
+        if (str == nullptr || len == 0)
         {
             return String(alloc_copy, nullptr, 0, 0);
         }
@@ -1396,15 +1435,6 @@ public:
         : m_data(nullptr)
         , m_len(0), m_alloc_and_capacity(std::allocator_traits<Alloc>::select_on_container_copy_construction(other.m_alloc_and_capacity.first()), 0)
     {
-        // if (other.m_len > 0)
-        // {
-        //     this->allocate(other.m_len);
-        //     std::copy(other.m_data,
-        //              other.m_data + other.m_len,
-        //              m_data);
-
-        //     this->m_len = other.m_len;
-        // }
         (*this) += other;
     }
 
@@ -1413,17 +1443,17 @@ public:
     {
         other.m_data = nullptr;
         other.m_len = 0;
-        other.m_alloc_and_capacity.second= 0;
+        other.m_alloc_and_capacity.second = 0;
     }
 
     ~String()
     {
-        if (this->m_data)
+        if (this->m_data != nullptr)
         {
             std::allocator_traits<Alloc>::deallocate(
                 this->m_alloc_and_capacity.first(),
                 this->m_data,
-                this->m_alloc_and_capacity.second+ 1
+                this->m_alloc_and_capacity.second + 1
             );
         }
     }
@@ -1588,13 +1618,13 @@ public:
             std::allocator_traits<Alloc>::deallocate(
                 this->m_alloc_and_capacity.first(),
                 this->m_data,
-                this->m_alloc_and_capacity.second+ 1
+                this->m_alloc_and_capacity.second + 1
             );
         }
 
         // Update members
         this->m_data = new_data;
-        this->m_alloc_and_capacity.second= new_capacity;
+        this->m_alloc_and_capacity.second = new_capacity;
     }
 
     /**
@@ -1936,6 +1966,19 @@ template<typename Alloc>
         return false;
     }
     return std::equal(rhs.data(), rhs.data() + rhs.size(), reinterpret_cast<const std::byte*>(lhs));
+}
+
+namespace literal
+{
+    [[nodiscard]] constexpr auto operator""_s(const char* str, std::size_t len) -> crab_cpp::str
+    {
+        return str::from_raw_parts(str, len).expect("Invalid UTF-8 sequence while calling operator\"\"_s");
+    }
+
+    [[nodiscard]] constexpr auto operator""_S(const char* str, std::size_t len) -> crab_cpp::String
+    {
+        return crab_cpp::String::from(str).ok().expect_take("Invalid UTF-8 sequence while calling operator\"\"_S");
+    }
 }
 
 }
