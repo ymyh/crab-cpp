@@ -23,4 +23,5 @@ compile_commands.json
 
 # Other
 *.json
+*.log
 .cursorrules

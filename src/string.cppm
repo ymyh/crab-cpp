@@ -68,7 +68,7 @@ public:
         using reference = const std::byte&;
 
     public:
-        const std::byte *ptr = nullptr;
+        const std::byte* ptr = nullptr;
 
     public:
         explicit Iter() = default;
@@ -141,7 +141,7 @@ struct FromUtf8Error
  * @param len The length of the string in bytes
  * @return true if the string is valid UTF-8
  */
-[[nodiscard]] constexpr auto is_valid_utf8(const char* str, std::size_t len) noexcept -> bool
+[[nodiscard]] constexpr auto is_valid_utf8(const std::byte* str, std::size_t len) noexcept -> bool
 {
     if (str == nullptr || len == 0)
     {
@@ -153,7 +153,7 @@ struct FromUtf8Error
 
     while (pos < len)
     {
-        utf8proc_ssize_t advance = utf8proc_iterate(
+        const auto advance = utf8proc_iterate(
             reinterpret_cast<const utf8proc_uint8_t*>(str + pos),
             len - pos,
             &codepoint
@@ -168,9 +168,9 @@ struct FromUtf8Error
     return true;
 }
 
-[[nodiscard]] constexpr auto is_valid_utf8(const std::byte* str, std::size_t len) noexcept -> bool
+[[nodiscard]] constexpr auto is_valid_utf8(const char* str, std::size_t len) noexcept -> bool
 {
-    return is_valid_utf8(std::bit_cast<const char*>(str), len);
+    return is_valid_utf8(std::bit_cast<const std::byte*>(str), len);
 }
 
 /**
@@ -369,7 +369,7 @@ public:
 
             while (pos < len)
             {
-                utf8proc_ssize_t result = utf8proc_iterate(
+                const auto result = utf8proc_iterate(
                     reinterpret_cast<const utf8proc_uint8_t*>(data + pos),
                     len - pos,
                     &codepoint
@@ -722,7 +722,6 @@ public:
     constexpr auto to_ascii_lowercase() const -> raw::String<Alloc>
     {
         auto string = raw::String<Alloc>();
-        // string.clear();
         string.push_str(*this);
         string.make_ascii_lowercase();
 
@@ -737,7 +736,6 @@ public:
     constexpr auto to_ascii_uppercase() const -> raw::String<Alloc>
     {
         auto string = raw::String<Alloc>();
-        // string.clear();
         string.push_str(*this);
         string.make_ascii_uppercase();
 
@@ -750,8 +748,7 @@ public:
      */
     [[nodiscard]] auto trim_ascii() const -> str
     {
-        const auto s = this->trim_ascii_start();
-        return s.trim_ascii_end();
+        return this->trim_ascii_start().trim_ascii_end();
     }
 
     /**
@@ -767,11 +764,11 @@ public:
 
         const std::byte* start = this->m_data;
         const std::byte* end = this->m_data + this->m_len;
+        utf8proc_int32_t codepoint = 0;
 
         while (start < end)
         {
-            utf8proc_int32_t codepoint;
-            utf8proc_ssize_t advance = utf8proc_iterate(reinterpret_cast<const utf8proc_uint8_t*>(start),
+            const auto advance = utf8proc_iterate(reinterpret_cast<const utf8proc_uint8_t*>(start),
                                                         end - start,
                                                         &codepoint);
             if (advance <= 0)
@@ -799,11 +796,11 @@ public:
         const std::byte* start = this->m_data;
         const std::byte* end = this->m_data + this->m_len;
         const std::byte* last_non_ws = start;
+        utf8proc_int32_t codepoint = 0;
 
         for (const std::byte* p = start; p < end; )
         {
-            utf8proc_int32_t codepoint;
-            utf8proc_ssize_t advance = utf8proc_iterate(reinterpret_cast<const utf8proc_uint8_t*>(p),
+            const auto advance = utf8proc_iterate(reinterpret_cast<const utf8proc_uint8_t*>(p),
                                                         end - p,
                                                         &codepoint);
             if (advance <= 0)
@@ -1130,13 +1127,13 @@ private:
             {
                 if (s != nullptr)
                 {
-                    utf8proc_int32_t codepoint;
+                    utf8proc_int32_t codepoint = 0;
                     size_t pos = 0;
                     const auto size = this->s->size();
 
                     while (pos < size)
                     {
-                        utf8proc_ssize_t advance = utf8proc_iterate(
+                        const auto advance = utf8proc_iterate(
                             reinterpret_cast<const utf8proc_uint8_t*>(this->s->m_data + pos),
                             size - pos,
                             &codepoint
@@ -1156,13 +1153,13 @@ private:
 
             [[nodiscard]] auto operator++() noexcept -> SplitASCIIWhiteSpaceIter&
             {
-                utf8proc_int32_t codepoint;
+                utf8proc_int32_t codepoint = 0;
                 size_t pos = this->span.data - this->s->m_data + this->span.len;
                 const auto size = this->s->size();
 
                 while (pos < size)
                 {
-                    utf8proc_ssize_t advance = utf8proc_iterate(
+                    const auto advance = utf8proc_iterate(
                         reinterpret_cast<const utf8proc_uint8_t*>(this->s->m_data + pos),
                         size - pos,
                         &codepoint
@@ -1529,12 +1526,12 @@ public:
      */
     auto make_ascii_lowercase() noexcept -> void
     {
-        utf8proc_int32_t codepoint;
+        utf8proc_int32_t codepoint = 0;
         std::size_t pos = 0;
 
         while (pos < this->m_len)
         {
-            utf8proc_ssize_t advance = utf8proc_iterate(
+            const auto advance = utf8proc_iterate(
                 reinterpret_cast<const utf8proc_uint8_t*>(this->m_data + pos),
                 this->m_len - pos,
                 &codepoint
@@ -1555,12 +1552,12 @@ public:
      */
     auto make_ascii_uppercase() noexcept -> void
     {
-        utf8proc_int32_t codepoint;
+        utf8proc_int32_t codepoint = 0;
         std::size_t pos = 0;
 
         while (pos < this->m_len)
         {
-            utf8proc_ssize_t advance = utf8proc_iterate(
+            const auto advance = utf8proc_iterate(
                 reinterpret_cast<const utf8proc_uint8_t*>(this->m_data + pos),
                 this->m_len - pos,
                 &codepoint
@@ -1744,7 +1741,7 @@ public:
         }
 
         // Decode the UTF-8 sequence
-        utf8proc_int32_t codepoint;
+        utf8proc_int32_t codepoint = 0;
         utf8proc_iterate(
             reinterpret_cast<const utf8proc_uint8_t*>(this->m_data + start),
             this->m_len - start,
@@ -1788,7 +1785,7 @@ public:
     {
         // Convert Unicode scalar value to UTF-8
         utf8proc_uint8_t utf8[4];
-        utf8proc_ssize_t len = utf8proc_encode_char(
+        const auto len = utf8proc_encode_char(
             static_cast<utf8proc_int32_t>(ch.code_point()),
             utf8
         );
@@ -1923,11 +1920,7 @@ template<typename Alloc>
 template<typename Alloc>
 [[nodiscard]] constexpr auto operator==(const str& lhs, const raw::String<Alloc>& rhs) noexcept -> bool
 {
-    if (lhs.size() != rhs.size())
-    {
-        return false;
-    }
-    return std::equal(lhs.data(), lhs.data() + lhs.size(), rhs.data());
+    return rhs == lhs;
 }
 
 template<typename Alloc>
@@ -1943,11 +1936,7 @@ template<typename Alloc>
 template<typename Alloc>
 [[nodiscard]] constexpr auto operator==(const char* lhs, const raw::String<Alloc>& rhs) noexcept -> bool
 {
-    if (std::strlen(lhs) != rhs.size())
-    {
-        return false;
-    }
-    return std::equal(rhs.data(), rhs.data() + rhs.size(), reinterpret_cast<const std::byte*>(lhs));
+    return rhs == lhs;
 }
 
 [[nodiscard]] constexpr auto operator==(const str& lhs, const char* rhs) noexcept -> bool
@@ -1961,11 +1950,7 @@ template<typename Alloc>
 
 [[nodiscard]] constexpr auto operator==(const char* lhs, const str& rhs) noexcept -> bool
 {
-    if (std::strlen(lhs) != rhs.size())
-    {
-        return false;
-    }
-    return std::equal(rhs.data(), rhs.data() + rhs.size(), reinterpret_cast<const std::byte*>(lhs));
+    return rhs == lhs;
 }
 
 namespace literal
