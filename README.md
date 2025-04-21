@@ -131,6 +131,7 @@ int main()
 ```
 
 #### Char & str & String (Optional feature)
+Define macro `CRAB_CPP_ENABLE_STRING` to enable this sub-module.
 Those three types are basically a weaken version of `char`, `&str`, `String` in Rust, but with null terminator for better interoperability with C/C++ APIs.
 Using utf8proc to handle utf8 encoding, supports Unicode 16.
 Still lacking many methods, but can be used for simple string operations.
@@ -155,6 +156,10 @@ int main()
     auto vec = ss->split(",") | std::ranges::to<std::vector<str>>();
     assert(vec[0] == "Hello");
     assert(vec[1].trim_ascii() == "world!");
+
+    // `join_with` inside namespace `strings` are wrappers of std::views::join_with
+    ss = s.split(",") | strings::join_with("\n") | std::ranges::to<String>();
+    assert(ss == "Hello\n World!");
 }
 ```
 
