@@ -13,6 +13,7 @@ target("crab_cpp")
 
     if is_os("windows") then
         add_defines("_CRT_USE_BUILTIN_OFFSETOF")
+        add_cxxflags("/utf-8")
         set_toolchains("clang-cl")
     else
         set_toolchains("clang")
@@ -32,6 +33,7 @@ target("crab_cpp_dev")
 
     if is_os("windows") then
         add_defines("_CRT_USE_BUILTIN_OFFSETOF")
+        add_cxxflags("/utf-8")
         add_toolchains("clang-cl")
     else
         add_toolchains("clang")

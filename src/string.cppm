@@ -823,6 +823,56 @@ public:
         return str(start, last_non_ws - start);
     }
 
+    /**
+     * @brief If the string starts with the pattern prefix, returns the substring after the prefix, wrapped in Some.
+     * This method removes the prefix exactly once.
+     * @returns A string slice with the prefix removed, if the string does not start with prefix, returns None.
+    */
+    [[nodiscard]] auto strip_prefix(const str& pattern) const -> Option<str>
+    {
+        if (this->starts_with(pattern))
+        {
+            return this->slice(pattern.size());
+        }
+
+        return None{};
+    }
+
+    /**
+     * @brief If the string starts with the pattern suffix, returns the substring before the suffix, wrapped in Some.
+     * This method removes the suffix exactly once.
+     * @returns A str slice with the prefix removed, if the string does not ends with suffix, returns None.
+    */
+    [[nodiscard]] auto strip_suffix(const str& pattern) const -> Option<str>
+    {
+        if (this->ends_with(pattern))
+        {
+            return this->slice(0, this->m_len - pattern.size());
+        }
+
+        return None{};
+    }
+
+        /**
+     * @brief If the string starts with the pattern prefix, returns the substring after the prefix, wrapped in Some.
+     * This method removes the prefix exactly once.
+     * @returns A string slice with the prefix removed, if the string does not start with prefix, returns None.
+    */
+    [[nodiscard]] auto strip_prefix(const char* pattern) const -> Option<str>
+    {
+        return this->strip_prefix(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::strip_prefix#pattern"));
+    }
+
+    /**
+     * @brief If the string starts with the pattern suffix, returns the substring before the suffix, wrapped in Some.
+     * This method removes the suffix exactly once.
+     * @returns A str slice with the prefix removed, if the string does not ends with suffix, returns None.
+    */
+    [[nodiscard]] auto strip_suffix(const char* pattern) const -> Option<str>
+    {
+        return this->strip_suffix(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::strip_suffix#pattern"));
+    }
+
 // iterators
 private:
     struct Lines
@@ -1082,8 +1132,6 @@ private:
         const plain_str pattern;
 
     public:
-        constexpr explicit Split() = default;
-
         constexpr Split(const str& s, const plain_str& pattern) : s(&s), pattern(pattern) {}
 
     public:
@@ -1121,23 +1169,22 @@ private:
         public:
             const str* s = nullptr;
             plain_str span;
-            size_t skip = 0;
+            size_t pos = 0;
 
             constexpr explicit SplitASCIIWhiteSpaceIter() noexcept = default;
 
-            explicit SplitASCIIWhiteSpaceIter(const str* s) noexcept : s(s), span(s->m_data, s->m_len)
+            explicit SplitASCIIWhiteSpaceIter(const str* s) noexcept : s(s)
             {
                 if (s != nullptr)
                 {
                     utf8proc_int32_t codepoint = 0;
-                    size_t pos = 0;
                     const auto size = this->s->size();
 
-                    while (pos < size)
+                    while (this->pos < size)
                     {
                         const auto advance = utf8proc_iterate(
-                            reinterpret_cast<const utf8proc_uint8_t*>(this->s->m_data + pos),
-                            size - pos,
+                            reinterpret_cast<const utf8proc_uint8_t*>(this->s->m_data + this->pos),
+                            size - this->pos,
                             &codepoint
                         );
 
@@ -1146,16 +1193,16 @@ private:
                             break;
                         }
 
-                        pos += advance;
+                        this->pos += advance;
                     }
 
-                    this->span = plain_str(this->s->m_data, pos);
+                    this->span = plain_str(this->s->m_data, this->pos);
 
-                    while (pos < size)
+                    while (this->pos < size)
                     {
                         const auto advance = utf8proc_iterate(
-                            reinterpret_cast<const utf8proc_uint8_t*>(this->s->m_data + pos),
-                            size - pos,
+                            reinterpret_cast<const utf8proc_uint8_t*>(this->s->m_data + this->pos),
+                            size - this->pos,
                             &codepoint
                         );
 
@@ -1165,22 +1212,27 @@ private:
                         }
 
                         pos += advance;
-                        this->skip += advance;
                     }
                 }
             }
 
-            [[nodiscard]] auto operator++() noexcept -> SplitASCIIWhiteSpaceIter&
+            constexpr auto operator++() noexcept -> SplitASCIIWhiteSpaceIter&
             {
                 utf8proc_int32_t codepoint = 0;
-                size_t pos = this->span.data - this->s->m_data + this->span.len + this->skip;
+                const size_t old_pos = this->pos;
                 const auto size = this->s->size();
 
-                while (pos < size)
+                if (this->pos >= size)
+                {
+                    this->s = nullptr;
+                    return *this;
+                }
+
+                while (this->pos < size)
                 {
                     const auto advance = utf8proc_iterate(
-                        reinterpret_cast<const utf8proc_uint8_t*>(this->s->m_data + pos),
-                        size - pos,
+                        reinterpret_cast<const utf8proc_uint8_t*>(this->s->m_data + this->pos),
+                        size - this->pos,
                         &codepoint
                     );
 
@@ -1192,14 +1244,13 @@ private:
                     pos += advance;
                 }
 
-                this->span = plain_str(this->s->m_data + pos, size - pos);
-                this->skip = 0;
+                this->span = plain_str(this->s->m_data + old_pos, this->pos - old_pos);
 
                 while (pos < size)
                 {
                     const auto advance = utf8proc_iterate(
-                        reinterpret_cast<const utf8proc_uint8_t*>(this->s->m_data + pos),
-                        size - pos,
+                        reinterpret_cast<const utf8proc_uint8_t*>(this->s->m_data + this->pos),
+                        size - this->pos,
                         &codepoint
                     );
 
@@ -1208,14 +1259,13 @@ private:
                         break;
                     }
 
-                    pos += advance;
-                    this->skip += advance;
+                    this->pos += advance;
                 }
 
                 return *this;
             }
 
-            [[nodiscard]] auto operator++(int) noexcept -> SplitASCIIWhiteSpaceIter
+            [[nodiscard]] constexpr auto operator++(int) noexcept -> SplitASCIIWhiteSpaceIter
             {
                 SplitASCIIWhiteSpaceIter temp = *this;
                 ++(*this);
@@ -1224,23 +1274,21 @@ private:
 
             [[nodiscard]] constexpr auto operator==(const SplitASCIIWhiteSpaceIter& other) const noexcept -> bool
             {
-                return this->s == other.s && this->span == other.span;
+                return this->s == other.s;
             }
 
-            [[nodiscard]] constexpr auto operator*() const noexcept -> const plain_str&
+            [[nodiscard]] constexpr auto operator*() const noexcept -> reference
             {
                 return this->span;
             }
 
-            [[nodiscard]] constexpr auto operator->() const noexcept -> const plain_str*
+            [[nodiscard]] constexpr auto operator->() const noexcept -> pointer
             {
                 return &this->span;
             }
         };
 
     public:
-        constexpr explicit SplitASCIIWhiteSpace() = default;
-
         constexpr explicit SplitASCIIWhiteSpace(const str& s) : s(&s) {}
 
     public:
