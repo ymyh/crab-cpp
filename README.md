@@ -1,13 +1,16 @@
 ## Crab_cpp: Rust-like Struct and Function in C++23
 
 ### Overview
-Crab_cpp is a C++23 library that simulates Rust's Option<T>, Result<T, E>, panic!, unimplemented!, and a match macro to modern C++. Designed for developers who appreciate Rust's explicit error handling and pattern matching but work in C++ ecosystems. This library supports only C++23 and requires std module.
+Crab_cpp is a C++23 library that simulates Rust's Option<T>, Result<T, E>, panic!, unimplemented!, a match macro and optional Char, str, String to modern C++. Designed for developers who appreciate Rust's explicit error handling and pattern matching but work in C++ ecosystems. This library supports only C++23 and depends on std module.
+
+### How to Compile
+Currently use [xmake](https://github.com/xmake-io/xmake) to compile this library. Welcome to contribute if you need more build systems.
 
 ### Features & Usage
 
 #### panic & unimplemented
 Prints a message and calls std::terminate().
-- If CRAB_CPP_ENABLE_BACKTRACE is defined, it will print a backtrace using std::stacktrace::current()
+- If the macro `CRAB_CPP_ENABLE_BACKTRACE` is defined, it will print std::stacktrace::current()
 
 ```c++
 import crab_cpp;
@@ -20,9 +23,8 @@ int main()
 ```
 
 #### Option &lt;T&gt;
-Option<T> is inherited from `std::variant<None, T>`, where None is alias of `std::monostate`.
-Have two different specialization holds lvalue reference and pointer that has same size as size_t.
-Also includes several monadic functions inspired by Rust.
+Option<T> is inherited from `std::variant<None, T>`, add few more Rust-like methods, where `None` is alias for `std::monostate`.
+It features two specialized variants, one holding lvalue references, another containing pointers. Both maintaining sizeof(size_t) memory footprint for optimal compatibility.
 
 ```c++
 import crab_cpp;
@@ -56,7 +58,6 @@ int main()
     // take() moves int out of the Option, leaving None behind
     num = opt.take();
 
-    // None is alias of std::monostate
     assert(opt.is_none());
 
     // reference or pointer are specialized which has same size as size_t
@@ -78,7 +79,7 @@ int main()
 ```
 
 #### Result &lt;T, E&gt;
-Result<T, E> is inherited from `std::variant<T, E>`, also includes several monadic functions inspired by Rust.
+Result<T, E> is inherited from `std::variant<T, E>`, add few more Rust-like methods.
 
 ```c++
 import crab_cpp;
@@ -112,7 +113,7 @@ int main()
     // unwrap() returns int&
     int num = res.unwrap();
 
-    // ok() moves out the value to an Option, do not use this Result anymore
+    // ok() try to moves out the value to an Option, do not use this Result anymore
     Option<int> opt = res.ok();
 
     match (foo(false))
@@ -131,12 +132,13 @@ int main()
 ```
 
 #### Char & str & String (Optional feature)
-Define macro `CRAB_CPP_ENABLE_STRING` to enable this sub-module.
-Those three types are basically a weaken version of `char`, `&str`, `String` in Rust, but with null terminator for better interoperability with C/C++ APIs.
-Using utf8proc to handle utf8 encoding, supports Unicode 16.
-Still lacking many methods, but can be used for simple string operations.
-implemented std::formatter and operator<< for print, but it will stop printing while encountering first null terminator.
-Noted `String` is actually a alias of `crab_cpp::raw::String<std::allocator<std::byte>>`, use the raw one if you want to use a custom allocator.
+To enable this sub-module, define the `CRAB_CPP_ENABLE_STRING` macro.
+
+These three types represent simplified counterparts of Rust's `char`, `&str`, and `String`, with null-terminated strings to ensure better interoperability with C/C++ APIs. Prefer using the `from` method to construct `str` or `String` rather than direct constructors.
+
+We've implemented `std::formatter` support and `operator<<` for printing, though output will truncate at the first null terminator. Note that String is an alias for `crab_cpp::raw::String<std::allocator<std::byte>>`, use the raw version for custom allocators. UTF-8 handling is powered by utf8proc, supporting up to Unicode 16.
+
+While core functionality is implemented, many methods remain unimplemented. Contributions are welcome!
 
 ```c++
 import std;
@@ -164,10 +166,10 @@ int main()
 ```
 
 ### Why Crab_cpp ?
-Compared to std::optional, std::expected, Crab_cpp offers
+Compared to existing corresponding classes, Crab_cpp offers
 - Rust-like APIs
 - Simple pattern matching support
+- UTF-8 based string
 
-Compared to std::string_view, std::string, Crab_cpp offers
-- UTF-8 encoded
-- Rust-like APIs
+### Thanks
+[utf8proc](https://github.com/JuliaStrings/utf8proc) Provide utf8 process.
