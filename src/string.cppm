@@ -1,7 +1,6 @@
 module;
 
 #include "include/utf8proc.h"
-#define offsetof(t, d) __builtin_offsetof(t, d)
 
 export module crab_cpp:string;
 
@@ -26,8 +25,6 @@ struct compressed_pair : private T1
 
     [[nodiscard]] constexpr auto first() noexcept -> T1& { return *this; }
     [[nodiscard]] constexpr auto first() const noexcept -> const T1& { return *this; }
-
-    constexpr auto offsetof_second() const noexcept -> std::size_t { return 0; }
 };
 
 template<typename T1, typename T2>
@@ -40,8 +37,6 @@ struct compressed_pair<T1, T2, false>
 
     [[nodiscard]] constexpr auto get_first() noexcept -> T1& { return first; }
     [[nodiscard]] constexpr auto get_first() const noexcept -> const T1& { return first; }
-
-    [[nodiscard]] constexpr auto offsetof_second() const noexcept -> std::size_t { return offsetof(compressed_pair, T2); }
 };
 
 struct plain_str
@@ -54,9 +49,6 @@ struct plain_str
     constexpr plain_str(const plain_str&) = default;
 
     explicit constexpr plain_str(const std::byte* data, size_t len) noexcept : data(data), len(len) {}
-
-public:
-    auto operator=(const plain_str& other) noexcept -> plain_str& = default;
 
 public:
     struct Iter
@@ -1129,17 +1121,10 @@ private:
         using const_iterator = SplitIter;
 
         const str* s;
-        const plain_str pattern;
+        plain_str pattern;
 
     public:
         constexpr Split(const str& s, const plain_str& pattern) : s(&s), pattern(pattern) {}
-
-    public:
-        auto operator=(const Split& other) noexcept -> Split&
-        {
-            std::memcpy(this, &other, sizeof(Split));
-            return *this;
-        }
 
     public:
         [[nodiscard]] constexpr auto begin() noexcept -> SplitIter
