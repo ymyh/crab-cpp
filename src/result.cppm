@@ -21,7 +21,7 @@ struct Result : std::variant<T, E>
     /**
      * Calls f if the result is Ok, otherwise returns the Err value of self.
      */
-    template<typename F, typename Self, typename U = typename std::invoke_result_t<F, T&>::type>
+    template<typename F, typename Self, typename U = typename std::invoke_result_t<F, T&>>
         requires requires (F f, T& r)
         {
             { f(r) } -> std::same_as<Result<U, E>>;
@@ -117,7 +117,7 @@ struct Result : std::variant<T, E>
     /**
      * Maps a Result<T, E> to Result<U, E> by applying a function to a contained Ok value, leaving an Err value untouched.
      */
-    template<typename Self, typename F, typename U = typename std::invoke_result_t<F, T&>::type>
+    template<typename Self, typename F, typename U = typename std::invoke_result_t<F, T&>>
         requires requires (F f, T& r)
         {
             { f(r) } -> std::same_as<U>;
@@ -135,7 +135,7 @@ struct Result : std::variant<T, E>
     /**
      * Maps a Result<T, E> to Result<T, F> by applying a function to a contained Err value, leaving an Ok value untouched.
      */
-    template<typename Self, typename M, typename F = typename std::invoke_result_t<M, E&>::type>
+    template<typename Self, typename M, typename F = typename std::invoke_result_t<M, E&>>
         requires requires (M m, E& e)
         {
             { m(e) } -> std::same_as<F>;

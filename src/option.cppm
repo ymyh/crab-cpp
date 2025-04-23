@@ -24,12 +24,12 @@ struct Option<T> : std::variant<None, T>
     /**
      * Returns None if the option is None, otherwise calls f with the wrapped value and returns the result.
      */
-    template<typename Self, typename F, typename U = typename std::invoke_result_t<F, T&>::type>
+    template<typename Self, typename F, typename U = typename std::invoke_result_t<F, T&>>
         requires requires (F f, T &t)
         {
-            { f(t) } -> std::same_as<Option<U>>;
+            { f(t) } -> std::same_as<Option<typename U::type>>;
         }
-    auto and_then(this Self&& self, F&& f) -> Option<U>
+    auto and_then(this Self&& self, F&& f) -> Option<typename U::type>
     {
         if (self.is_some())
         {
@@ -106,7 +106,7 @@ struct Option<T> : std::variant<None, T>
     /**
      * Maps an Option<T> to Option<U> by applying a function to a contained value (if Some) or returns None (if None).
      */
-    template<typename Self, typename F, typename U = typename std::invoke_result_t<F, T&>::type>
+    template<typename Self, typename F, typename U = typename std::invoke_result_t<F, T&>>
         requires requires (F f, T& t)
         {
             { f(t) } -> std::same_as<U>;
@@ -124,7 +124,7 @@ struct Option<T> : std::variant<None, T>
     /**
      * Computes a default function result (if none), or applies a different function to the contained value (if Some).
      */
-    template<typename Self, typename F, typename D, typename U = typename std::invoke_result_t<F, T&>::type>
+    template<typename Self, typename F, typename D, typename U = typename std::invoke_result_t<F, T&>>
         requires requires (F f, T& t, D d)
         {
             { f(t) } -> std::same_as<U>;
@@ -252,7 +252,7 @@ struct Option<T>
     using type = T;
 
 private:
-    using raw_type = std::remove_reference_t<T>;
+    using raw_type = std::remove_pointer_t<T>;
 
     T ptr;
 
@@ -319,7 +319,7 @@ public:
     /**
      * Maps an Option<T> to Option<U> by applying a function to a contained value (if Some) or returns None (if None).
      */
-    template<typename Self, typename F, typename U = typename std::invoke_result_t<F, raw_type&>::type>
+    template<typename Self, typename F, typename U = typename std::invoke_result_t<F, raw_type&>>
         requires requires (F f, T& t)
         {
             { f(t) } -> std::same_as<U>;
@@ -429,7 +429,7 @@ public:
     /**
      * Maps an Option<T> to Option<U> by applying a function to a contained value (if Some) or returns None (if None).
      */
-    template<typename Self, typename F, typename U = typename std::invoke_result_t<F, T>::type>
+    template<typename Self, typename F, typename U = typename std::invoke_result_t<F, T>>
         requires requires (F f, T t)
         {
             { f(t) } -> std::same_as<U>;
