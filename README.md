@@ -1,3 +1,17 @@
+## Table of Contents
+- [Table of Contents](#table-of-contents)
+- [Crab\_cpp: Rust-like Struct and Function in C++23](#crab_cpp-rust-like-struct-and-function-in-c23)
+  - [Overview](#overview)
+  - [How to Compile](#how-to-compile)
+  - [Features \& Usage](#features--usage)
+    - [panic \& unimplemented](#panic--unimplemented)
+    - [Option \<T\>](#option-t)
+    - [Result \<T, E\>](#result-t-e)
+    - [Char \& str \& String (Optional feature)](#char--str--string-optional-feature)
+  - [Why Crab\_cpp ?](#why-crab_cpp-)
+  - [Todos](#todos)
+  - [Thanks](#thanks)
+
 ## Crab_cpp: Rust-like Struct and Function in C++23
 
 ### Overview
@@ -170,6 +184,11 @@ Compared to existing corresponding classes, Crab_cpp offers
 - Rust-like APIs
 - Simple pattern matching support
 - UTF-8 based string
+
+### Todos
+- Support C++20
+- Implement more methods
+- Complete tests for the first release
 
 ### Thanks
 [utf8proc](https://github.com/JuliaStrings/utf8proc) Provide utf8 process.
