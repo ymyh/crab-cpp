@@ -1,4 +1,5 @@
 add_rules("mode.debug", "mode.release")
+add_requires("gtest", {configs = {main = true}})
 
 target("crab_cpp")
     set_kind("static")
@@ -6,13 +7,12 @@ target("crab_cpp")
     set_policy("build.c++.modules", true, {public = true})
 
     add_files("src/*.cppm", {public = true})
-    add_files("src/*.c")
+    add_files("src/*.c", {public = true})
 
     add_defines("CRAB_CPP_ENABLE_STRING", "UTF8PROC_STATIC")
     add_includedirs("include", ".")
 
     if is_os("windows") then
-        add_defines("_CRT_USE_BUILTIN_OFFSETOF")
         add_cxxflags("/utf-8")
         set_toolchains("clang-cl")
     else
@@ -25,14 +25,36 @@ target("crab_cpp_dev")
     set_policy("build.c++.modules", true)
 
     add_files("src/*.cppm", {public = true})
-    add_files("main.cpp")
     add_files("src/*.c")
+    add_files("main.cpp")
 
     add_defines("CRAB_CPP_ENABLE_STRING", "UTF8PROC_STATIC")
     add_includedirs("include", ".")
 
     if is_os("windows") then
-        add_defines("_CRT_USE_BUILTIN_OFFSETOF")
+        add_cxxflags("/utf-8")
+        add_toolchains("clang-cl")
+    else
+        add_toolchains("clang")
+    end
+
+target("crab_cpp_test")
+    set_kind("binary")
+    set_languages("c++23", "c11")
+    set_policy("build.c++.modules", true)
+    add_packages("gtest")
+
+    add_files("src/*.cppm", {public = true})
+    add_files("src/*.c")
+    add_files("tests/*.cpp")
+
+    add_defines("CRAB_CPP_ENABLE_STRING", "UTF8PROC_STATIC")
+    add_includedirs("include", ".")
+
+    add_links("gtest_main")
+
+    if is_os("windows") then
+        add_ldflags("/subsystem:console")
         add_cxxflags("/utf-8")
         add_toolchains("clang-cl")
     else
