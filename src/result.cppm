@@ -24,9 +24,9 @@ struct Result : std::variant<T, E>
     template<typename F, typename Self, typename U = typename std::invoke_result_t<F, T&>>
         requires requires (F f, T& r)
         {
-            { f(r) } -> std::same_as<Result<U, E>>;
+            { f(r) } -> std::same_as<Result<typename U::type, typename U::err_type>>;
         }
-    auto and_then(this Self&& self, F&& f) -> Result<U, E>
+    auto and_then(this Self&& self, F&& f) -> Result<typename U::type, typename U::err_type>
     {
         if (self.is_ok())
         {
@@ -140,11 +140,11 @@ struct Result : std::variant<T, E>
         {
             { m(e) } -> std::same_as<F>;
         }
-    auto map_err(this Self&& self, F&& f) -> Result<T, F>
+    auto map_err(this Self&& self, M&& m) -> Result<T, F>
     {
         if (self.is_err())
         {
-            return f(std::get<1>(self));
+            return m(std::get<1>(self));
         }
 
         return std::get<0>(self);

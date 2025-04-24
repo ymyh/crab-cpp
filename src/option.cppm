@@ -153,6 +153,7 @@ struct Option<T> : std::variant<None, T>
             return temp;
         }
 
+        (*this) = std::move(t);
         return None{};
     }
 
@@ -175,6 +176,7 @@ struct Option<T> : std::variant<None, T>
         if (this->is_some() && std::invoke(pred, std::get<1>(*this)))
         {
             T tmp = std::move(std::get<1>(*this));
+            (*this) = None{};
             return tmp;
         }
 
