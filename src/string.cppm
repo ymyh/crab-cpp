@@ -958,7 +958,7 @@ private:
                 {
                     this->skip = 2;
                 }
-                start += this->skip;
+                // start += this->skip;
 
                 // If we're at the end after skipping line ending, mark as finished
                 if (start >= bytes.size())
@@ -1165,6 +1165,32 @@ private:
                     utf8proc_int32_t codepoint = 0;
                     const auto size = this->s->size();
 
+                    // Skip leading whitespace
+                    while (this->pos < size)
+                    {
+                        const auto advance = utf8proc_iterate(
+                            reinterpret_cast<const utf8proc_uint8_t*>(this->s->m_data + this->pos),
+                            size - this->pos,
+                            &codepoint
+                        );
+
+                        if (!std::bit_cast<Char>(codepoint).is_ascii_whitespace())
+                        {
+                            break;
+                        }
+
+                        this->pos += advance;
+                    }
+
+                    // If we've reached the end or string is all whitespace, set to end iterator
+                    if (this->pos >= size)
+                    {
+                        this->s = nullptr;
+                        return;
+                    }
+
+                    // Find the end of the current non-whitespace sequence
+                    const auto start_pos = this->pos;
                     while (this->pos < size)
                     {
                         const auto advance = utf8proc_iterate(
@@ -1181,57 +1207,22 @@ private:
                         this->pos += advance;
                     }
 
-                    this->span = plain_str(this->s->m_data, this->pos);
-
-                    while (this->pos < size)
-                    {
-                        const auto advance = utf8proc_iterate(
-                            reinterpret_cast<const utf8proc_uint8_t*>(this->s->m_data + this->pos),
-                            size - this->pos,
-                            &codepoint
-                        );
-
-                        if (!std::bit_cast<Char>(codepoint).is_ascii_whitespace())
-                        {
-                            break;
-                        }
-
-                        pos += advance;
-                    }
+                    this->span = plain_str(this->s->m_data + start_pos, this->pos - start_pos);
                 }
             }
 
             constexpr auto operator++() noexcept -> SplitASCIIWhiteSpaceIter&
             {
-                utf8proc_int32_t codepoint = 0;
-                const size_t old_pos = this->pos;
-                const auto size = this->s->size();
-
-                if (this->pos >= size)
+                if (this->s == nullptr)
                 {
-                    this->s = nullptr;
                     return *this;
                 }
 
+                utf8proc_int32_t codepoint = 0;
+                const auto size = this->s->size();
+
+                // Skip whitespace
                 while (this->pos < size)
-                {
-                    const auto advance = utf8proc_iterate(
-                        reinterpret_cast<const utf8proc_uint8_t*>(this->s->m_data + this->pos),
-                        size - this->pos,
-                        &codepoint
-                    );
-
-                    if (std::bit_cast<Char>(codepoint).is_ascii_whitespace())
-                    {
-                        break;
-                    }
-
-                    pos += advance;
-                }
-
-                this->span = plain_str(this->s->m_data + old_pos, this->pos - old_pos);
-
-                while (pos < size)
                 {
                     const auto advance = utf8proc_iterate(
                         reinterpret_cast<const utf8proc_uint8_t*>(this->s->m_data + this->pos),
@@ -1246,6 +1237,33 @@ private:
 
                     this->pos += advance;
                 }
+
+                // If we've reached the end, set to end iterator
+                if (this->pos >= size)
+                {
+                    this->s = nullptr;
+                    return *this;
+                }
+
+                // Find the end of the current non-whitespace sequence
+                const auto start_pos = this->pos;
+                while (this->pos < size)
+                {
+                    const auto advance = utf8proc_iterate(
+                        reinterpret_cast<const utf8proc_uint8_t*>(this->s->m_data + this->pos),
+                        size - this->pos,
+                        &codepoint
+                    );
+
+                    if (std::bit_cast<Char>(codepoint).is_ascii_whitespace())
+                    {
+                        break;
+                    }
+
+                    this->pos += advance;
+                }
+
+                this->span = plain_str(this->s->m_data + start_pos, this->pos - start_pos);
 
                 return *this;
             }
@@ -1347,18 +1365,36 @@ public:
 public:
     [[nodiscard]] constexpr auto operator<=>(const str& other) const noexcept -> std::strong_ordering
     {
+        // If both strings are empty, they are equal
+        if (this->m_len == 0 && other.m_len == 0)
+        {
+            return std::strong_ordering::equal;
+        }
+
+        // If this string is empty, it's less than any non-empty string
+        if (this->m_len == 0)
+        {
+            return std::strong_ordering::less;
+        }
+
+        // If other string is empty, this string is greater
+        if (other.m_len == 0)
+        {
+            return std::strong_ordering::greater;
+        }
+
+        // Compare byte by byte until we find a difference
         const std::size_t min_len = std::min(this->m_len, other.m_len);
-        if (min_len == 0)
+        for (std::size_t i = 0; i < min_len; ++i)
         {
-            return this->m_len <=> other.m_len;
+            if (this->m_data[i] != other.m_data[i])
+            {
+                return this->m_data[i] <=> other.m_data[i];
+            }
         }
 
-        const int result = std::equal(this->m_data, this->m_data + min_len, other.m_data);
-        if (result != 0)
-        {
-            return result <=> 0;
-        }
-
+        // If we get here, one string is a prefix of the other
+        // The shorter string is considered less
         return this->m_len <=> other.m_len;
     }
 
@@ -1369,6 +1405,44 @@ public:
             return false;
         }
         return std::equal(this->m_data, this->m_data + this->m_len, other.m_data);
+    }
+
+    /**
+     * @brief Parses this string into a numeric type
+     * @tparam T The numeric type to parse into
+     * @return A Result containing either the parsed value or a std::from_chars_result
+     * @note This function only works with numeric types (integral and floating-point)
+     */
+    template<typename T>
+        requires (std::integral<T> || std::floating_point<T>)
+    [[nodiscard]] constexpr auto parse() const noexcept -> Result<T, std::from_chars_result>
+    {
+        if (this->m_len == 0)
+        {
+            return std::from_chars_result{reinterpret_cast<const char*>(this->m_data), std::errc::invalid_argument};
+        }
+
+        T value;
+        auto result = std::from_chars(
+            reinterpret_cast<const char*>(this->m_data),
+            reinterpret_cast<const char*>(this->m_data + this->m_len),
+            value
+        );
+
+        if (result.ec == std::errc{})
+        {
+            if (result.ptr == reinterpret_cast<const char*>(this->m_data + this->m_len))
+            {
+                return value;
+            }
+            else
+            {
+                result.ec = std::errc::invalid_argument;
+                return result;
+            }
+        }
+
+        return result;
     }
 };
 
@@ -1966,18 +2040,36 @@ public:
 
     [[nodiscard]] constexpr auto operator<=>(const String& other) const noexcept -> std::strong_ordering
     {
+        // If both strings are empty, they are equal
+        if (this->m_len == 0 && other.m_len == 0)
+        {
+            return std::strong_ordering::equal;
+        }
+
+        // If this string is empty, it's less than any non-empty string
+        if (this->m_len == 0)
+        {
+            return std::strong_ordering::less;
+        }
+
+        // If other string is empty, this string is greater
+        if (other.m_len == 0)
+        {
+            return std::strong_ordering::greater;
+        }
+
+        // Compare byte by byte until we find a difference
         const std::size_t min_len = std::min(this->m_len, other.m_len);
-        if (min_len == 0)
+        for (std::size_t i = 0; i < min_len; ++i)
         {
-            return this->m_len <=> other.m_len;
+            if (this->m_data[i] != other.m_data[i])
+            {
+                return this->m_data[i] <=> other.m_data[i];
+            }
         }
 
-        const int result = std::equal(this->m_data, this->m_data + min_len, other.m_data);
-        if (result != 0)
-        {
-            return result <=> 0;
-        }
-
+        // If we get here, one string is a prefix of the other
+        // The shorter string is considered less
         return this->m_len <=> other.m_len;
     }
 
@@ -2065,9 +2157,9 @@ namespace literal
         return str::from_raw_parts(str, len).expect("Invalid UTF-8 sequence while calling operator\"\"_s");
     }
 
-    [[nodiscard]] constexpr auto operator""_S(const char* str, std::size_t len) -> crab_cpp::String
+    [[nodiscard]] constexpr auto operator""_S(const char* str, std::size_t len) -> String
     {
-        return crab_cpp::String::from(str).ok().expect_take("Invalid UTF-8 sequence while calling operator\"\"_S");
+        return String::from(str).ok().expect_take("Invalid UTF-8 sequence while calling operator\"\"_S");
     }
 }
 
