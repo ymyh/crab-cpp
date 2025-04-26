@@ -468,6 +468,11 @@ public:
     template<typename Alloc = std::allocator<std::byte>>
     constexpr auto repeat(size_t n) const -> raw::String<Alloc>
     {
+        if (n == 0 || this->m_len == 0)
+        {
+            return raw::String<Alloc>();
+        }
+
         if (n > std::numeric_limits<std::size_t>::max() / this->m_len)
         {
             panic("Repeat times overflow");
@@ -645,7 +650,10 @@ public:
 
         // Calculate the maximum possible size needed for the result
         // This is a worst-case estimate where every character is replaced
-        std::size_t max_size = this->m_len + (replacement.size() - pattern.size()) * std::min(n, this->m_len / pattern.size());
+        const auto size_diff = replacement.size() > pattern.size()
+            ? replacement.size() - pattern.size()
+            : 0;
+        std::size_t max_size = this->m_len + size_diff * std::min(n, this->m_len / pattern.size());
         string.reserve(max_size);
 
         std::size_t pos = 0;
@@ -653,19 +661,15 @@ public:
 
         while (pos < this->m_len && count < n)
         {
-            const Option<std::size_t> found = this->find(pattern);
+            const Option<std::size_t> found = this->slice(pos).find(pattern);
             if (found.is_none())
             {
                 break;
             }
 
-            const auto found_idx = found.unwrap();
+            const auto found_idx = found.unwrap() + pos;
             // Copy the part before the pattern
-            if (found_idx > pos)
-            {
-                string.push_str_unchecked(str::from_bytes_unchecked(this->m_data + pos, found_idx - pos));
-            }
-
+            string.push_str_unchecked(str::from_bytes_unchecked(this->m_data + pos, found_idx - pos));
             // Copy the replacement
             string.push_str_unchecked(replacement);
 
@@ -949,25 +953,6 @@ private:
                     return *this;
                 }
 
-                // Skip the line ending we found in the previous iteration
-                if (bytes[start] == std::byte{'\n'})
-                {
-                    this->skip = 1;
-                }
-                else if (bytes[start] == std::byte{'\r'} && start + 1 < bytes.size() && bytes[start + 1] == std::byte{'\n'})
-                {
-                    this->skip = 2;
-                }
-                // start += this->skip;
-
-                // If we're at the end after skipping line ending, mark as finished
-                if (start >= bytes.size())
-                {
-                    this->s = nullptr;
-                    span = plain_str(nullptr, 0);
-                    return *this;
-                }
-
                 // Find the next line ending
                 std::size_t pos = start;
                 while (pos < bytes.size())
@@ -975,11 +960,13 @@ private:
                     if (bytes[pos] == std::byte{'\n'})
                     {
                         span = plain_str(bytes.data() + start, pos - start);
+                        this->skip = 1;
                         break;
                     }
                     else if (bytes[pos] == std::byte{'\r'} && pos + 1 < bytes.size() && bytes[pos + 1] == std::byte{'\n'})
                     {
                         span = plain_str(bytes.data() + start, pos - start);
+                        this->skip = 2;
                         break;
                     }
                     pos++;
