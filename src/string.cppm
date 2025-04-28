@@ -292,6 +292,28 @@ public:
                (this->m_value == 0x0C) || // FORM FEED
                (this->m_value == 0x0D);   // CARRIAGE RETURN
     }
+
+    /**
+     * @brief Checks if the value is an ASCII decimal digit: U+0030 '0' ..= U+0039 '9'.
+     */
+    [[nodiscard]] constexpr auto is_ascii_digit() const noexcept -> bool
+    {
+        return this->m_value >= static_cast<std::uint32_t>('0') && this->m_value <= static_cast<std::uint32_t>('9');
+    }
+
+    /**
+     * @brief Checks if the value is an ASCII hexadecimal digit: U+0030 '0' ..= U+0039 '9', U+0041 'A' ..= U+0046 'F', or U+0061 'a' ..= U+0066 'f'.
+     */
+    [[nodiscard]] constexpr auto is_ascii_hexdigit() const noexcept -> bool
+    {
+        return this->is_ascii_digit() ||
+               (this->m_value >= static_cast<std::uint32_t>('A') && this->m_value <= static_cast<std::uint32_t>('F')) ||
+               (this->m_value >= static_cast<std::uint32_t>('a') && this->m_value <= static_cast<std::uint32_t>('f'));
+    }
+
+// operators
+public:
+    constexpr auto operator==(const Char& other) const noexcept -> bool = default;
 };
 
 namespace raw
@@ -624,6 +646,44 @@ public:
         return this->find(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::find#pattern"));
     }
 
+    /**
+     * @brief Parses this string into a numeric type
+     * @tparam T The numeric type to parse into
+     * @return A Result containing either the parsed value or a std::from_chars_result
+     * @note This function only works with numeric types (integral and floating-point)
+     */
+    template<typename T>
+        requires (std::integral<T> || std::floating_point<T>)
+    [[nodiscard]] constexpr auto parse() const noexcept -> Result<T, std::from_chars_result>
+    {
+        if (this->m_len == 0)
+        {
+            return std::from_chars_result{reinterpret_cast<const char*>(this->m_data), std::errc::invalid_argument};
+        }
+
+        T value;
+        auto result = std::from_chars(
+            reinterpret_cast<const char*>(this->m_data),
+            reinterpret_cast<const char*>(this->m_data + this->m_len),
+            value
+        );
+
+        if (result.ec == std::errc{})
+        {
+            if (result.ptr == reinterpret_cast<const char*>(this->m_data + this->m_len))
+            {
+                return value;
+            }
+            else
+            {
+                result.ec = std::errc::invalid_argument;
+                return result;
+            }
+        }
+
+        return result;
+    }
+
     template<typename Alloc = std::allocator<std::byte>>
     constexpr auto replace(const str& pattern, const str& replacement) const -> raw::String<Alloc>
     {
@@ -710,6 +770,56 @@ public:
     [[nodiscard]] constexpr auto rfind(const char* pattern) const noexcept -> Option<std::size_t>
     {
         return this->rfind(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::rfind#pattern"));
+    }
+
+    /**
+     * @brief If the string starts with the pattern prefix, returns the substring after the prefix, wrapped in Some.
+     * This method removes the prefix exactly once.
+     * @returns A string slice with the prefix removed, if the string does not start with prefix, returns None.
+    */
+    [[nodiscard]] auto strip_prefix(const str& pattern) const -> Option<str>
+    {
+        if (this->starts_with(pattern))
+        {
+            return this->slice(pattern.size());
+        }
+
+        return None{};
+    }
+
+    /**
+     * @brief If the string starts with the pattern suffix, returns the substring before the suffix, wrapped in Some.
+     * This method removes the suffix exactly once.
+     * @returns A str slice with the prefix removed, if the string does not ends with suffix, returns None.
+    */
+    [[nodiscard]] auto strip_suffix(const str& pattern) const -> Option<str>
+    {
+        if (this->ends_with(pattern))
+        {
+            return this->slice(0, this->m_len - pattern.size());
+        }
+
+        return None{};
+    }
+
+        /**
+     * @brief If the string starts with the pattern prefix, returns the substring after the prefix, wrapped in Some.
+     * This method removes the prefix exactly once.
+     * @returns A string slice with the prefix removed, if the string does not start with prefix, returns None.
+    */
+    [[nodiscard]] auto strip_prefix(const char* pattern) const -> Option<str>
+    {
+        return this->strip_prefix(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::strip_prefix#pattern"));
+    }
+
+    /**
+     * @brief If the string starts with the pattern suffix, returns the substring before the suffix, wrapped in Some.
+     * This method removes the suffix exactly once.
+     * @returns A str slice with the prefix removed, if the string does not ends with suffix, returns None.
+    */
+    [[nodiscard]] auto strip_suffix(const char* pattern) const -> Option<str>
+    {
+        return this->strip_suffix(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::strip_suffix#pattern"));
     }
 
     /**
@@ -817,56 +927,6 @@ public:
         }
 
         return str(start, last_non_ws - start);
-    }
-
-    /**
-     * @brief If the string starts with the pattern prefix, returns the substring after the prefix, wrapped in Some.
-     * This method removes the prefix exactly once.
-     * @returns A string slice with the prefix removed, if the string does not start with prefix, returns None.
-    */
-    [[nodiscard]] auto strip_prefix(const str& pattern) const -> Option<str>
-    {
-        if (this->starts_with(pattern))
-        {
-            return this->slice(pattern.size());
-        }
-
-        return None{};
-    }
-
-    /**
-     * @brief If the string starts with the pattern suffix, returns the substring before the suffix, wrapped in Some.
-     * This method removes the suffix exactly once.
-     * @returns A str slice with the prefix removed, if the string does not ends with suffix, returns None.
-    */
-    [[nodiscard]] auto strip_suffix(const str& pattern) const -> Option<str>
-    {
-        if (this->ends_with(pattern))
-        {
-            return this->slice(0, this->m_len - pattern.size());
-        }
-
-        return None{};
-    }
-
-        /**
-     * @brief If the string starts with the pattern prefix, returns the substring after the prefix, wrapped in Some.
-     * This method removes the prefix exactly once.
-     * @returns A string slice with the prefix removed, if the string does not start with prefix, returns None.
-    */
-    [[nodiscard]] auto strip_prefix(const char* pattern) const -> Option<str>
-    {
-        return this->strip_prefix(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::strip_prefix#pattern"));
-    }
-
-    /**
-     * @brief If the string starts with the pattern suffix, returns the substring before the suffix, wrapped in Some.
-     * This method removes the suffix exactly once.
-     * @returns A str slice with the prefix removed, if the string does not ends with suffix, returns None.
-    */
-    [[nodiscard]] auto strip_suffix(const char* pattern) const -> Option<str>
-    {
-        return this->strip_suffix(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::strip_suffix#pattern"));
     }
 
 // iterators
@@ -1296,7 +1356,92 @@ private:
         using const_iterator = SplitASCIIWhiteSpaceIter;
     };
 
+    struct Chars
+    {
+        const str* s = nullptr;
+
+        struct CharsIter
+        {
+            using iterator_category = std::forward_iterator_tag;
+            using difference_type = std::ptrdiff_t;
+            using value_type = Char;
+            using pointer = const Char*;
+            using reference = const Char&;
+
+            const str* s = nullptr;
+            std::size_t pos = 0;
+            Char ch;
+
+            constexpr explicit CharsIter() noexcept = default;
+
+            constexpr explicit CharsIter(const str* s, size_t pos) noexcept : s(s), pos(pos)
+            {
+                const auto advance = utf8proc_iterate(
+                    reinterpret_cast<const utf8proc_uint8_t*>(this->s->data() + this->pos),
+                    this->s->size() - this->pos,
+                    reinterpret_cast<utf8proc_int32_t*>(&this->ch)
+                );
+
+                this->pos += advance;
+            }
+
+            constexpr auto operator++() noexcept -> CharsIter&
+            {
+                if (this->s == nullptr || this->pos >= this->s->size())
+                {
+                    return *this;
+                }
+
+                const auto advance = utf8proc_iterate(
+                    reinterpret_cast<const utf8proc_uint8_t*>(this->s->data() + this->pos),
+                    this->s->size() - this->pos,
+                    reinterpret_cast<utf8proc_int32_t*>(&this->ch)
+                );
+
+                if (advance <= 0)
+                {
+                    return *this;
+                }
+
+                this->pos += advance;
+                return *this;
+            }
+
+            constexpr auto operator->() noexcept -> pointer
+            {
+                return reinterpret_cast<const Char*>(&this->ch);
+            }
+
+            constexpr auto operator*() noexcept -> reference
+            {
+                return this->ch;
+            }
+
+            [[nodiscard]] constexpr auto operator==(const CharsIter& other) const noexcept -> bool
+            {
+                return this->s->m_data == other.s->m_data && this->pos == other.pos;
+            }
+        };
+
+        constexpr explicit Chars(const str& s) : s(&s) {}
+
+        constexpr auto begin() -> CharsIter
+        {
+            return CharsIter(this->s, 0);
+        }
+
+        constexpr auto end() -> CharsIter
+        {
+            return CharsIter(this->s, this->s->size());
+        }
+    };
+
 public:
+    [[nodiscard]] constexpr auto chars() const noexcept -> Chars
+    {
+        return Chars(*this);
+    }
+
     /**
      * @brief Returns an iterator over the lines of this string
      * @return A Lines iterator that yields each line in the string
@@ -1392,44 +1537,6 @@ public:
             return false;
         }
         return std::equal(this->m_data, this->m_data + this->m_len, other.m_data);
-    }
-
-    /**
-     * @brief Parses this string into a numeric type
-     * @tparam T The numeric type to parse into
-     * @return A Result containing either the parsed value or a std::from_chars_result
-     * @note This function only works with numeric types (integral and floating-point)
-     */
-    template<typename T>
-        requires (std::integral<T> || std::floating_point<T>)
-    [[nodiscard]] constexpr auto parse() const noexcept -> Result<T, std::from_chars_result>
-    {
-        if (this->m_len == 0)
-        {
-            return std::from_chars_result{reinterpret_cast<const char*>(this->m_data), std::errc::invalid_argument};
-        }
-
-        T value;
-        auto result = std::from_chars(
-            reinterpret_cast<const char*>(this->m_data),
-            reinterpret_cast<const char*>(this->m_data + this->m_len),
-            value
-        );
-
-        if (result.ec == std::errc{})
-        {
-            if (result.ptr == reinterpret_cast<const char*>(this->m_data + this->m_len))
-            {
-                return value;
-            }
-            else
-            {
-                result.ec = std::errc::invalid_argument;
-                return result;
-            }
-        }
-
-        return result;
     }
 };
 
@@ -2150,6 +2257,21 @@ namespace literal
     }
 }
 
+}
+
+export template<>
+struct std::formatter<crab_cpp::Char> : std::formatter<std::uint32_t>
+{
+    auto format(const crab_cpp::Char& ch, std::format_context& ctx) const
+    {
+        return std::format_to(ctx.out(), "u{:x}", ch.code_point());
+    }
+};
+
+export auto operator<<(std::ostream& os, const crab_cpp::Char& ch) -> std::ostream&
+{
+    os << std::hex << "u" << ch.code_point();
+    return os;
 }
 
 export template<>
