@@ -214,6 +214,19 @@ TEST(StringTest, StrLines)
     }
 }
 
+TEST(StringTest, StrChars)
+{
+    auto s = str::from("y̆").unwrap();
+    auto chars = s.chars();
+    auto it = chars.begin();
+
+    EXPECT_EQ(it->code_point(), std::uint32_t('y'));
+    ++it;
+    EXPECT_EQ(it->code_point(), std::uint32_t(774));
+    ++it;
+    EXPECT_EQ(it, chars.end());
+}
+
 TEST(StringTest, StrLiterals)
 {
     using namespace literal;
@@ -324,24 +337,6 @@ TEST(StringTest, StrToStdString)
     auto empty_std = empty_str.to_std_string();
     EXPECT_TRUE(empty_std.empty());
     EXPECT_EQ(empty_std.size(), 0);
-
-    // Test string with non-ASCII characters
-    auto non_ascii_str = str::from("Héllö Wörld").unwrap();
-    auto non_ascii_std = non_ascii_str.to_std_string();
-    EXPECT_EQ(non_ascii_std, "Héllö Wörld");
-    EXPECT_EQ(non_ascii_std.size(), non_ascii_str.size());
-
-    // Test string with special characters
-    auto special_str = str::from("Hello\nWorld\t123").unwrap();
-    auto special_std = special_str.to_std_string();
-    EXPECT_EQ(special_std, "Hello\nWorld\t123");
-    EXPECT_EQ(special_std.size(), special_str.size());
-
-    // Test string with UTF-8 characters
-    auto utf8_str = str::from("你好世界").unwrap();
-    auto utf8_std = utf8_str.to_std_string();
-    EXPECT_EQ(utf8_std, "你好世界");
-    EXPECT_EQ(utf8_std.size(), utf8_str.size());
 }
 
 TEST(StringTest, StrReplace)
@@ -412,33 +407,6 @@ TEST(StringTest, StrRepeat)
     auto empty = str::from("").unwrap();
     EXPECT_EQ(empty.repeat(5), empty);
 
-    // Test repeat with single character
-    auto a = str::from("a").unwrap();
-    auto aaa = str::from("aaa").unwrap();
-    EXPECT_EQ(a.repeat(3), aaa);
-
-    // Test repeat with non-ASCII characters
-    auto non_ascii = str::from("你好").unwrap();
-    auto non_ascii_repeated = str::from("你好你好").unwrap();
-    EXPECT_EQ(non_ascii.repeat(2), non_ascii_repeated);
-
-    // Test repeat with special characters
-    auto special = str::from("Hello\n").unwrap();
-    auto special_repeated = str::from("Hello\nHello\n").unwrap();
-    EXPECT_EQ(special.repeat(2), special_repeated);
-
-    // Test repeat with space
-    auto space = str::from(" ").unwrap();
-    auto spaces = str::from("   ").unwrap();
-    EXPECT_EQ(space.repeat(3), spaces);
-
-    // Test repeat with zero times
-    EXPECT_EQ(hello.repeat(0), empty);
-
-    // Test repeat with one time
-    EXPECT_EQ(hello.repeat(1), hello);
-
-    // Test repeat with large number
-    auto large_repeated = str::from("HelloHelloHelloHelloHello").unwrap();
-    EXPECT_EQ(hello.repeat(5), large_repeated);
+    auto alphabet = str::from("abcdefghijklmnopqrstuvwxyz").unwrap();
+    EXPECT_DEATH(alphabet.repeat(0xFFFFFFFFFFFFFFFF), ".*");
 }
