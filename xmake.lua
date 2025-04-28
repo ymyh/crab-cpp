@@ -15,8 +15,10 @@ target("crab_cpp")
     if is_os("windows") then
         add_cxxflags("/utf-8")
         set_toolchains("clang-cl")
+    elseif is_os("macosx") then
+        add_toolchains("clang")
     else
-        set_toolchains("clang")
+        add_toolchains("gcc")
     end
 
 target("crab_cpp_dev")
@@ -34,8 +36,10 @@ target("crab_cpp_dev")
     if is_os("windows") then
         add_cxxflags("/utf-8")
         add_toolchains("clang-cl")
-    else
+    elseif is_os("macosx") then
         add_toolchains("clang")
+    else
+        add_toolchains("gcc")
     end
 
 target("crab_cpp_test")
@@ -57,6 +61,8 @@ target("crab_cpp_test")
         add_ldflags("/subsystem:console")
         add_cxxflags("/utf-8")
         add_toolchains("clang-cl")
-    else
+    elseif is_os("macosx") then
         add_toolchains("clang")
+    else
+        add_toolchains("gcc")
     end
