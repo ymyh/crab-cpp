@@ -71,7 +71,6 @@ int main()
 
     // take() moves int out of the Option, leaving None behind
     num = opt.take();
-
     assert(opt.is_none());
 
     // reference or pointer are specialized which has same size as size_t
@@ -148,9 +147,9 @@ int main()
 #### Char & str & String (Optional feature)
 To enable this sub-module, define the `CRAB_CPP_ENABLE_STRING` macro.
 
-These three types represent simplified counterparts of Rust's `char`, `&str`, and `String`, with null-terminated strings to ensure better interoperability with C/C++ APIs. Prefer using the `from` method to construct `str` or `String` rather than direct constructors.
+These three types represent simplified counterparts of Rust's `char`, `&str`, and `String`. `String` is ends with null-terminated to ensure better interoperability with C/C++ APIs. Using the `from` method to construct `str` or `String` instead of constructors, except you need a empty one.
 
-We've implemented `std::formatter` support and `operator<<` for printing, though output will truncate at the first null terminator. Note that String is an alias for `crab_cpp::raw::String<std::allocator<std::byte>>`, use the raw version for custom allocators. UTF-8 handling is powered by utf8proc, supporting up to Unicode 16.
+We've implemented `std::formatter` support and `operator<<` for printing, though output will stop at the first null terminator. Note that String is an alias for `crab_cpp::raw::String<std::allocator<std::byte>>`, use the raw version for custom allocators. UTF-8 handling is powered by utf8proc, supporting up to Unicode 16.
 
 While core functionality is implemented, many methods remain unimplemented. Contributions are welcome!
 
@@ -191,4 +190,5 @@ Compared to existing corresponding classes, Crab_cpp offers
 - Complete tests for the first release
 
 ### Thanks
-[utf8proc](https://github.com/JuliaStrings/utf8proc) Provide utf8 process.
+[utf8proc](https://github.com/JuliaStrings/utf8proc): Provide utf8 process.
+[Google Test](https://github.com/google/googletest): For testing.
