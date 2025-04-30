@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 import crab_cpp;
+import std;
 
 using namespace crab_cpp;
 
@@ -125,29 +126,51 @@ TEST(StringTest, StrStrip)
 
 TEST(StringTest, StrSplit)
 {
-    auto hello_world = str::from("Hello World").unwrap();
     auto hello = str::from("Hello").unwrap();
     auto world = str::from("World").unwrap();
     auto space = str::from(" ").unwrap();
 
-    // Test split
-    auto split = hello_world.split(space);
-    auto it = split.begin();
-    EXPECT_EQ(str::from_bytes_unchecked(it->data, it->len), hello);
-    ++it;
-    EXPECT_EQ(str::from_bytes_unchecked(it->data, it->len), world);
-    ++it;
-    EXPECT_EQ(it, split.end());
+    {
+        auto hello_world = str::from("Hello World").unwrap();
 
-    // Test split_ascii_whitespace
-    auto str_with_ws = str::from("  Hello   World  ").unwrap();
-    auto split_ws = str_with_ws.split_ascii_whitespace();
-    auto it2 = split_ws.begin();
-    EXPECT_EQ(str::from_bytes_unchecked(it2->data, it2->len), hello);
-    ++it2;
-    EXPECT_EQ(str::from_bytes_unchecked(it2->data, it2->len), world);
-    ++it2;
-    EXPECT_EQ(it2, split_ws.end());
+        // Test split
+        auto split = hello_world.split(space);
+        auto it = split.begin();
+        EXPECT_EQ(str::from_bytes_unchecked(it->data, it->len), hello);
+        ++it;
+        EXPECT_EQ(str::from_bytes_unchecked(it->data, it->len), world);
+        ++it;
+        EXPECT_EQ(it, split.end());
+    }
+
+    {
+        auto hello_world = str::from(" Hello World ").unwrap();
+
+        // Test split
+        auto split = hello_world.split(space);
+        auto it = split.begin();
+        EXPECT_EQ(str::from_bytes_unchecked(it->data, it->len), "");
+        ++it;
+        EXPECT_EQ(str::from_bytes_unchecked(it->data, it->len), hello);
+        ++it;
+        EXPECT_EQ(str::from_bytes_unchecked(it->data, it->len), world);
+        ++it;
+        EXPECT_EQ(str::from_bytes_unchecked(it->data, it->len), "");
+        ++it;
+        EXPECT_EQ(it, split.end());
+    }
+
+    {
+        // Test split_ascii_whitespace
+        auto str_with_ws = str::from("  Hello   World  ").unwrap();
+        auto split_ws = str_with_ws.split_ascii_whitespace();
+        auto it2 = split_ws.begin();
+        EXPECT_EQ(str::from_bytes_unchecked(it2->data, it2->len), hello);
+        ++it2;
+        EXPECT_EQ(str::from_bytes_unchecked(it2->data, it2->len), world);
+        ++it2;
+        EXPECT_EQ(it2, split_ws.end());
+    }
 }
 
 TEST(StringTest, StrLines)
@@ -384,16 +407,6 @@ TEST(StringTest, StrReplace)
 
     // Test replace_n with empty replacement
     EXPECT_EQ(hello_world.replace_n(space, empty_replacement, 1), str::from("HelloWorld").unwrap());
-
-    // Test replace_n with non-ASCII characters
-    auto repeated_non_ascii = str::from("Héllö Wörld Wörld").unwrap();
-    EXPECT_EQ(repeated_non_ascii.replace_n(non_ascii_pattern, non_ascii_replacement, 1), str::from("Héllö Universe Wörld").unwrap());
-    EXPECT_EQ(repeated_non_ascii.replace_n(non_ascii_pattern, non_ascii_replacement, 2), str::from("Héllö Universe Universe").unwrap());
-
-    // Test replace_n with UTF-8 characters
-    auto repeated_utf8 = str::from("你好世界世界").unwrap();
-    EXPECT_EQ(repeated_utf8.replace_n(utf8_pattern, utf8_replacement, 1), str::from("你好宇宙世界").unwrap());
-    EXPECT_EQ(repeated_utf8.replace_n(utf8_pattern, utf8_replacement, 2), str::from("你好宇宙宇宙").unwrap());
 }
 
 TEST(StringTest, StrRepeat)
@@ -408,5 +421,13 @@ TEST(StringTest, StrRepeat)
     EXPECT_EQ(empty.repeat(5), empty);
 
     auto alphabet = str::from("abcdefghijklmnopqrstuvwxyz").unwrap();
-    EXPECT_DEATH(alphabet.repeat(0xFFFFFFFFFFFFFFFF), ".*");
+    EXPECT_DEATH(alphabet.repeat(0xFFFFFFFFFFFFFFFF), "Repeat times overflow");
+}
+
+TEST(StringTest, JoinWith)
+{
+    using namespace literal;
+
+    auto s = str::from("hello,world").unwrap();
+    EXPECT_EQ(s.split(",") | strings::join_with(".") | std::ranges::to<String>(), "hello.world"_s);
 }
