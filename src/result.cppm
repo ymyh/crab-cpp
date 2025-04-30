@@ -7,6 +7,11 @@ import :option;
 export namespace crab_cpp
 {
 
+/**
+ * @brief Result type that can hold either a value of type T or an error of type E
+ * @tparam T The type of value that can be held in the Result
+ * @tparam E The type of error that can be held in the Result
+ */
 template<typename T, typename E>
 struct Result : std::variant<T, E>
 {
@@ -19,7 +24,12 @@ struct Result : std::variant<T, E>
     using err_type = E;
 
     /**
-     * Calls f if the result is Ok, otherwise returns the Err value of self.
+     * @brief Calls f if the result is Ok, otherwise returns the Err value of self
+     * @tparam F The type of the function to call
+     * @tparam Self The type of self
+     * @tparam U The return type of the function
+     * @param f The function to call
+     * @return Result containing the result of f if Ok, Err otherwise
      */
     template<typename F, typename Self, typename U = typename std::invoke_result_t<F, T&>>
         requires requires (F f, T& r)
@@ -37,7 +47,8 @@ struct Result : std::variant<T, E>
     }
 
     /**
-     * Returns true if Ok.
+     * @brief Returns true if the result is Ok
+     * @return true if the result is Ok, false otherwise
      */
     auto is_ok() const -> bool
     {
@@ -45,7 +56,8 @@ struct Result : std::variant<T, E>
     }
 
     /**
-     * Returns true if Err.
+     * @brief Returns true if the result is Err
+     * @return true if the result is Err, false otherwise
      */
     auto is_err() const -> bool
     {
@@ -53,8 +65,8 @@ struct Result : std::variant<T, E>
     }
 
     /**
-     * Converts from Result<T, E> to Option<T>.
-     * Converts self into an Option<T>, invalidate self, and discarding the error, if any.
+     * @brief Converts from Result<T, E> to Option<T>
+     * @return Option containing the value if Ok, None otherwise
      */
     auto ok() noexcept -> Option<T>
     {
@@ -68,8 +80,8 @@ struct Result : std::variant<T, E>
     }
 
     /**
-     * Converts from Result<T, E> to Option<E>.
-     * Converts self into an Option<E>, invalidate self, and discarding the success value, if any.
+     * @brief Converts from Result<T, E> to Option<E>
+     * @return Option containing the error if Err, None otherwise
      */
     auto err() noexcept -> Option<E>
     {
@@ -83,8 +95,11 @@ struct Result : std::variant<T, E>
     }
 
     /**
-     * Calls a function with a reference to the contained value if Ok.
-     * Returns the original result.
+     * @brief Calls a function with a reference to the contained value if Ok
+     * @tparam F The type of the function to call
+     * @tparam Self The type of self
+     * @param f The function to call
+     * @return The original result
      */
     template<typename F, typename Self>
         requires std::invocable<F, T&>
@@ -99,9 +114,12 @@ struct Result : std::variant<T, E>
     }
 
     /**
-     * Calls a function with a reference to the contained value if Err.
-     * Returns the original result.
-    */
+     * @brief Calls a function with a reference to the contained value if Err
+     * @tparam F The type of the function to call
+     * @tparam Self The type of self
+     * @param f The function to call
+     * @return The original result
+     */
     template<typename F, typename Self>
         requires std::invocable<F, E&>
     auto inspect_err(this Self&& self, F&& f) -> Self&&
@@ -115,7 +133,12 @@ struct Result : std::variant<T, E>
     }
 
     /**
-     * Maps a Result<T, E> to Result<U, E> by applying a function to a contained Ok value, leaving an Err value untouched.
+     * @brief Maps a Result<T, E> to Result<U, E> by applying a function to a contained Ok value
+     * @tparam Self The type of self
+     * @tparam F The type of the function to call
+     * @tparam U The return type of the function
+     * @param f The function to call
+     * @return Result containing the result of f if Ok, Err otherwise
      */
     template<typename Self, typename F, typename U = typename std::invoke_result_t<F, T&>>
         requires requires (F f, T& r)
@@ -133,7 +156,12 @@ struct Result : std::variant<T, E>
     }
 
     /**
-     * Maps a Result<T, E> to Result<T, F> by applying a function to a contained Err value, leaving an Ok value untouched.
+     * @brief Maps a Result<T, E> to Result<T, F> by applying a function to a contained Err value
+     * @tparam Self The type of self
+     * @tparam M The type of the function to call
+     * @tparam F The return type of the function
+     * @param m The function to call
+     * @return Result containing the value if Ok, result of m if Err
      */
     template<typename Self, typename M, typename F = typename std::invoke_result_t<M, E&>>
         requires requires (M m, E& e)
@@ -151,8 +179,11 @@ struct Result : std::variant<T, E>
     }
 
     /**
-     * Returns reference if Ok.
-     * Panics if Err with the given message.
+     * @brief Returns reference if Ok
+     * @tparam Self The type of self
+     * @param msg The panic message to display if Err
+     * @return Reference to the contained value
+     * @panics if Err with the given message
      */
     template<typename Self>
     auto expect(this Self&& self, std::string_view msg) noexcept -> auto&&
@@ -166,8 +197,11 @@ struct Result : std::variant<T, E>
     }
 
     /**
-     * Returns Err reference.
-     * Panics if Ok with the given message.
+     * @brief Returns Err reference
+     * @tparam Self The type of self
+     * @param msg The panic message to display if Ok
+     * @return Reference to the contained error
+     * @panics if Ok with the given message
      */
     template<typename Self>
     auto expect_err(this Self&& self, std::string_view msg) noexcept -> auto&&
@@ -181,8 +215,10 @@ struct Result : std::variant<T, E>
     }
 
     /**
-     * Returns reference if Ok.
-     * Panics if Err.
+     * @brief Returns reference if Ok
+     * @tparam Self The type of self
+     * @return Reference to the contained value
+     * @panics if Err
      */
     template<typename Self>
     auto unwrap(this Self&& self) noexcept -> auto&&
@@ -196,8 +232,10 @@ struct Result : std::variant<T, E>
     }
 
     /**
-     * Returns Err reference.
-     * Panics if Ok.
+     * @brief Returns Err reference
+     * @tparam Self The type of self
+     * @return Reference to the contained error
+     * @panics if Ok
      */
     template<typename Self>
     auto unwrap_err(this Self&& self) noexcept -> auto&&
