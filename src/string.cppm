@@ -84,12 +84,12 @@ public:
 
         auto operator*() const -> const std::byte&
         {
-            return *const_cast<std::byte*>(this->ptr);
+            return *this->ptr;
         }
 
         auto operator->() const -> const std::byte*
         {
-            return const_cast<std::byte*>(this->ptr);
+            return this->ptr;
         }
 
         constexpr auto operator<=>(const Iter&) const noexcept -> std::strong_ordering = default;
@@ -802,7 +802,7 @@ public:
         return None{};
     }
 
-        /**
+    /**
      * @brief If the string starts with the pattern prefix, returns the substring after the prefix, wrapped in Some.
      * This method removes the prefix exactly once.
      * @returns A string slice with the prefix removed, if the string does not start with prefix, returns None.
@@ -879,10 +879,6 @@ public:
             const auto advance = utf8proc_iterate(reinterpret_cast<const utf8proc_uint8_t*>(start),
                                                         end - start,
                                                         &codepoint);
-            if (advance <= 0)
-            {
-                break;
-            }
 
             if (!std::bit_cast<Char>(codepoint).is_ascii_whitespace())
             {
@@ -911,10 +907,6 @@ public:
             const auto advance = utf8proc_iterate(reinterpret_cast<const utf8proc_uint8_t*>(p),
                                                         end - p,
                                                         &codepoint);
-            if (advance <= 0)
-            {
-                break;
-            }
 
             p += advance;
 
@@ -964,6 +956,7 @@ private:
                             span = plain_str(bytes.data() + start, pos - start);
                             pos += 1; // Skip \n
                             skip = 1;
+
                             break;
                         }
                         else if (bytes[pos] == std::byte{'\r'} && pos + 1 < bytes.size() && bytes[pos + 1] == std::byte{'\n'})
@@ -971,6 +964,7 @@ private:
                             span = plain_str(bytes.data() + start, pos - start);
                             pos += 2; // Skip \r\n
                             skip = 2;
+
                             break;
                         }
                         pos++;
@@ -1114,12 +1108,12 @@ private:
 
             [[nodiscard]] auto operator->() const noexcept -> const plain_str*
             {
-                return const_cast<const plain_str*>(&this->span);
+                return &this->span;
             }
 
             [[nodiscard]] auto operator*() const noexcept -> const plain_str&
             {
-                return const_cast<const plain_str&>(this->span);
+                return this->span;
             }
 
             constexpr auto operator++() noexcept -> SplitIter&
@@ -1397,13 +1391,8 @@ private:
                     this->s->size() - this->pos,
                     reinterpret_cast<utf8proc_int32_t*>(&this->ch)
                 );
-
-                if (advance <= 0)
-                {
-                    return *this;
-                }
-
                 this->pos += advance;
+
                 return *this;
             }
 
@@ -1434,6 +1423,121 @@ private:
         {
             return CharsIter(this->s, this->s->size());
         }
+
+        using iterator = CharsIter;
+        using const_iterator = CharsIter;
+    };
+
+    struct Graphemes
+    {
+        const str* s = nullptr;
+
+        struct GraphemesIter
+        {
+            using iterator_category = std::forward_iterator_tag;
+            using difference_type = std::ptrdiff_t;
+            using value_type = plain_str;
+            using pointer = const plain_str*;
+            using reference = const plain_str&;
+
+            const str* s = nullptr;
+            std::size_t pos = 0;
+            utf8proc_int32_t state = 0;
+            plain_str current;
+
+            constexpr explicit GraphemesIter() noexcept = default;
+
+            constexpr explicit GraphemesIter(const str* s, size_t pos) noexcept : s(s), pos(pos)
+            {
+                if (s != nullptr)
+                {
+                    this->advance();
+                }
+            }
+
+            constexpr auto advance() noexcept -> void
+            {
+                if (this->s == nullptr || this->pos >= this->s->size())
+                {
+                    return;
+                }
+
+                utf8proc_int32_t codepoint1 = 0;
+                utf8proc_int32_t codepoint2 = 0;
+                std::size_t start_pos = this->pos;
+
+                // Get the first codepoint
+                const auto advance = utf8proc_iterate(
+                    reinterpret_cast<const utf8proc_uint8_t*>(this->s->data() + this->pos),
+                    this->s->size() - this->pos,
+                    &codepoint1
+                );
+                this->pos += advance;
+
+                // Keep advancing until we find a grapheme break
+                while (this->pos < this->s->size())
+                {
+                    const auto advance = utf8proc_iterate(
+                        reinterpret_cast<const utf8proc_uint8_t*>(this->s->data() + this->pos),
+                        this->s->size() - this->pos,
+                        &codepoint2
+                    );
+
+                    if (utf8proc_grapheme_break_stateful(codepoint1, codepoint2, &this->state))
+                    {
+                        break;
+                    }
+
+                    codepoint1 = codepoint2;
+                    this->pos += advance;
+                }
+
+                this->current = plain_str(this->s->data() + start_pos, this->pos - start_pos);
+            }
+
+            constexpr auto operator++() noexcept -> GraphemesIter&
+            {
+                this->advance();
+                return *this;
+            }
+
+            constexpr auto operator++(int) noexcept -> GraphemesIter
+            {
+                GraphemesIter temp = *this;
+                ++(*this);
+                return temp;
+            }
+
+            [[nodiscard]] constexpr auto operator==(const GraphemesIter& other) const noexcept -> bool
+            {
+                return this->s == other.s && this->pos == other.pos;
+            }
+
+            [[nodiscard]] constexpr auto operator*() const noexcept -> reference
+            {
+                return this->current;
+            }
+
+            [[nodiscard]] constexpr auto operator->() const noexcept -> pointer
+            {
+                return &this->current;
+            }
+        };
+
+        constexpr explicit Graphemes(const str& s) : s(&s) {}
+
+        constexpr auto begin() -> GraphemesIter
+        {
+            return GraphemesIter(this->s, 0);
+        }
+
+        constexpr auto end() -> GraphemesIter
+        {
+            return GraphemesIter(this->s, this->s->size());
+        }
+
+        using iterator = GraphemesIter;
+        using const_iterator = GraphemesIter;
     };
 
 public:
@@ -1491,6 +1595,15 @@ public:
     [[nodiscard]] constexpr auto split_ascii_whitespace() const noexcept -> SplitASCIIWhiteSpace
     {
        return SplitASCIIWhiteSpace(*this);
+    }
+
+    /**
+     * @brief Returns an iterator that yields each grapheme in the string
+     * @return A Graphemes iterator that yields each grapheme in the string
+     */
+    [[nodiscard]] constexpr auto graphemes() const noexcept -> Graphemes
+    {
+        return Graphemes(*this);
     }
 
 // operators
@@ -1786,6 +1899,11 @@ public:
         return this->m_data;
     }
 
+    [[nodiscard]] constexpr auto empty() const noexcept -> bool
+    {
+        return this->m_len == 0;
+    }
+
     /**
      * @brief Converts this string to its ASCII lower case equivalent in-place.
      * ASCII letters 'A' to 'Z' are mapped to 'a' to 'z', but non-ASCII letters are unchanged.
@@ -1948,15 +2066,6 @@ public:
     }
 
     /**
-     * @brief Converts the String to a std::string
-     * @return A std::string containing the String's contents
-     */
-    [[nodiscard]] auto to_std_string() const -> std::string
-    {
-        return std::string(std::bit_cast<const char*>(this->m_data), this->m_len);
-    }
-
-    /**
      * @brief Shortens this String to the specified length.
      * @details If new_len is greater than or equal to the string's current length, this has no effect.
      *          Note that this method has no effect on the allocated capacity of the string
@@ -2058,7 +2167,7 @@ public:
             this->reserve(new_len - this->m_alloc_and_capacity.second);
         }
 
-        std::copy(utf8, utf8 + len, this->m_data + this->m_len);
+        std::copy(utf8, utf8 + len, reinterpret_cast<utf8proc_uint8_t*>(this->m_data + this->m_len));
         this->m_len = new_len;
         // Add null terminator
         this->m_data[this->m_len] = std::byte{0};
@@ -2127,6 +2236,16 @@ public:
         return string;
     }
 
+    auto operator+(const Char ch) -> String
+    {
+        auto string = String();
+        string.reserve(this->m_len + sizeof(Char));
+        string += *this;
+        string += ch;
+
+        return string;
+    }
+
     auto operator+(const char* str) -> String
     {
         return (*this) + str::from(str).expect("Invalid UTF-8 sequence while calling String::operator+=");
@@ -2134,37 +2253,7 @@ public:
 
     [[nodiscard]] constexpr auto operator<=>(const String& other) const noexcept -> std::strong_ordering
     {
-        // If both strings are empty, they are equal
-        if (this->m_len == 0 && other.m_len == 0)
-        {
-            return std::strong_ordering::equal;
-        }
-
-        // If this string is empty, it's less than any non-empty string
-        if (this->m_len == 0)
-        {
-            return std::strong_ordering::less;
-        }
-
-        // If other string is empty, this string is greater
-        if (other.m_len == 0)
-        {
-            return std::strong_ordering::greater;
-        }
-
-        // Compare byte by byte until we find a difference
-        const std::size_t min_len = std::min(this->m_len, other.m_len);
-        for (std::size_t i = 0; i < min_len; ++i)
-        {
-            if (this->m_data[i] != other.m_data[i])
-            {
-                return this->m_data[i] <=> other.m_data[i];
-            }
-        }
-
-        // If we get here, one string is a prefix of the other
-        // The shorter string is considered less
-        return this->m_len <=> other.m_len;
+        return this->as_str() <=> other.as_str();
     }
 
     [[nodiscard]] constexpr auto operator==(const String& other) const noexcept -> bool
@@ -2270,7 +2359,10 @@ struct std::formatter<crab_cpp::Char> : std::formatter<std::uint32_t>
 
 export auto operator<<(std::ostream& os, const crab_cpp::Char& ch) -> std::ostream&
 {
+    std::ios_base::fmtflags original_base = std::cout.flags() & std::ios_base::basefield;
     os << std::hex << "u" << ch.code_point();
+    std::cout.flags(original_base);
+
     return os;
 }
 
