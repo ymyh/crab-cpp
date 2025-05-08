@@ -13,7 +13,6 @@ import std;
  * @brief A compressed pair implementation that optimizes storage for empty types
  * @tparam T1 First type
  * @tparam T2 Second type
- * @tparam IsEmpty Whether T1 is empty and not final
  */
 template<typename T1, typename T2, bool = std::is_empty_v<T1> && !std::is_final_v<T1>>
 struct compressed_pair : private T1
@@ -30,13 +29,13 @@ struct compressed_pair : private T1
 template<typename T1, typename T2>
 struct compressed_pair<T1, T2, false>
 {
-    T1 first;
+    T1 _first;
     T2 second;
 
-    constexpr compressed_pair(T1& x, const T2& y) noexcept : first(x), second(y) {}
+    constexpr compressed_pair(T1& x, const T2& y) noexcept : _first(x), second(y) {}
 
-    [[nodiscard]] constexpr auto get_first() noexcept -> T1& { return first; }
-    [[nodiscard]] constexpr auto get_first() const noexcept -> const T1& { return first; }
+    [[nodiscard]] constexpr auto first() noexcept -> T1& { return this->_first; }
+    [[nodiscard]] constexpr auto first() const noexcept -> const T1& { return this->_first; }
 };
 
 struct plain_str
@@ -95,12 +94,12 @@ public:
         constexpr auto operator<=>(const Iter&) const noexcept -> std::strong_ordering = default;
     };
 
-    constexpr auto begin() const noexcept -> Iter
+    [[nodiscard]] constexpr auto begin() const noexcept -> Iter
     {
         return Iter(this->data);
     }
 
-    constexpr auto end() const noexcept -> Iter
+    [[nodiscard]] constexpr auto end() const noexcept -> Iter
     {
         return Iter(this->data + this->len);
     }
@@ -352,12 +351,12 @@ public:
     constexpr str(char ch) noexcept {}
 
 public:
-    constexpr auto begin() const noexcept -> const std::byte*
+    [[nodiscard]] constexpr auto begin() const noexcept -> const std::byte*
     {
         return std::bit_cast<const std::byte*>(this->m_data);
     }
 
-    constexpr auto end() const noexcept -> const std::byte*
+    [[nodiscard]] constexpr auto end() const noexcept -> const std::byte*
     {
         return std::bit_cast<const std::byte*>(this->m_data + this->m_len);
     }
@@ -428,7 +427,7 @@ public:
      */
     [[nodiscard]] constexpr auto as_bytes() const noexcept -> std::span<const std::byte>
     {
-        return std::span<const std::byte>(this->m_data, this->m_len);
+        return std::span(this->m_data, this->m_len);
     }
 
     /**
@@ -509,7 +508,7 @@ public:
             std::memcpy(ptr + i * this->m_len, this->m_data, this->m_len);
         }
         string.m_len = n * this->m_len;
-        string.m_data[string.m_len] = std::byte(0);
+        string.m_data[string.m_len] = std::byte{0};
 
         return string;
     }
@@ -537,7 +536,7 @@ public:
             panic("Invalid parameter(s) while calling str::slice, from: {}, to: {}, size: {}", from, to, this->m_len);
         }
 
-        auto s = str::from_bytes_unchecked(this->m_data + from, to - from);
+        const auto s = str::from_bytes_unchecked(this->m_data + from, to - from);
         if (!is_valid_utf8(s.m_data, s.m_len))
         {
             panic("Invalid UTF-8 sequence while calling str::slice");
@@ -824,7 +823,6 @@ public:
 
     /**
      * @brief Converts ASCII uppercase characters to lowercase
-     * @param string A String stores original str's data with ASCII uppercase characters converted to lowercase
      */
     template<typename Alloc = std::allocator<std::byte>>
     constexpr auto to_ascii_lowercase() const -> raw::String<Alloc>
@@ -838,7 +836,6 @@ public:
 
     /**
      * @brief Converts ASCII lowercase characters to uppercase
-     * @param string A String stores original str's data with ASCII lowercase characters converted to uppercase
      */
     template<typename Alloc = std::allocator<std::byte>>
     constexpr auto to_ascii_uppercase() const -> raw::String<Alloc>
@@ -1055,15 +1052,124 @@ private:
         constexpr explicit Lines(const str& s) : s(s) {}
 
     public:
-        [[nodiscard]] constexpr auto begin() noexcept -> LinesIter
+        [[nodiscard]] constexpr auto begin() const noexcept -> LinesIter
         {
             return LinesIter(&this->s);
         }
 
-        [[nodiscard]] constexpr auto end() noexcept -> LinesIter
+        [[nodiscard]] constexpr auto end() const noexcept -> LinesIter
         {
             return LinesIter(nullptr);
         }
+    };
+
+    struct Matches
+    {
+        struct MatchesIter
+        {
+            using iterator_category = std::forward_iterator_tag;
+            using difference_type = std::ptrdiff_t;
+            using value_type = std::size_t;
+            using pointer = const std::size_t*;
+            using reference = const std::size_t&;
+
+            const str* s = nullptr;
+            plain_str pattern;
+            std::size_t match_pos = 0;
+            std::size_t pos = 0;
+
+            constexpr MatchesIter() noexcept = default;
+
+            constexpr MatchesIter(const str* s, const plain_str& pattern) noexcept : s(s), pattern(pattern)
+            {
+                if (s != nullptr)
+                {
+                    // Find the first match
+                    auto ptr = std::search(s->m_data, s->m_data + s->m_len, pattern.data, pattern.data + pattern.len);
+                    if (ptr != s->m_data + s->m_len && pattern.len > 0)
+                    {
+                        const auto match_pos = ptr - s->m_data;
+                        this->match_pos = match_pos;
+                        this->pos = match_pos + pattern.len;
+                    }
+                    else
+                    {
+                        // No match found, set to end iterator
+                        this->s = nullptr;
+                    }
+                }
+            }
+
+            [[nodiscard]] constexpr auto operator*() const noexcept -> reference
+            {
+                return this->match_pos;
+            }
+
+            [[nodiscard]] constexpr auto operator->() const noexcept -> pointer
+            {
+                return &this->match_pos;
+            }
+
+            constexpr auto operator++() noexcept -> MatchesIter&
+            {
+                if (this->s == nullptr)
+                {
+                    return *this;
+                }
+
+                // Search for the next match starting from the position after the last match
+                auto ptr = std::search(
+                    this->s->m_data + this->pos,
+                    this->s->m_data + this->s->m_len,
+                    this->pattern.data,
+                    this->pattern.data + this->pattern.len
+                );
+
+                if (ptr != this->s->m_data + this->s->m_len)
+                {
+                    const auto match_pos = ptr - this->s->m_data;
+                    this->match_pos = match_pos;
+                    this->pos = match_pos + this->pattern.len;
+                }
+                else
+                {
+                    // No more matches, set to end iterator
+                    this->s = nullptr;
+                }
+
+                return *this;
+            }
+
+            constexpr auto operator++(int) noexcept -> MatchesIter
+            {
+                MatchesIter temp = *this;
+                ++(*this);
+                return temp;
+            }
+
+            [[nodiscard]] constexpr auto operator==(const MatchesIter& other) const noexcept -> bool
+            {
+                return this->s == other.s;
+            }
+        };
+
+        const str* s;
+        plain_str pattern;
+
+        constexpr Matches(const str& s, const plain_str& pattern) : s(&s), pattern(pattern) {}
+
+        [[nodiscard]] constexpr auto begin() const noexcept -> MatchesIter
+        {
+            return MatchesIter(this->s, this->pattern);
+        }
+
+        [[nodiscard]] constexpr auto end() const noexcept -> MatchesIter
+        {
+            return MatchesIter(nullptr, this->pattern);
+        }
+
+        using iterator = MatchesIter;
+        using const_iterator = MatchesIter;
     };
 
     struct Split
@@ -1080,7 +1186,7 @@ private:
             plain_str pattern;
             plain_str span;
 
-            constexpr SplitIter() noexcept {}
+            constexpr SplitIter() noexcept = default;
 
             constexpr SplitIter(const str* s, const plain_str& pattern) noexcept : s(s), pattern(pattern)
             {
@@ -1097,7 +1203,7 @@ private:
                     if (ptr != this->s->m_data + this->s->m_len)
                     {
                         const auto pos = ptr - this->s->m_data;
-                        this->span = plain_str(s->m_data, std::size_t(pos));
+                        this->span = plain_str(s->m_data, size_t(pos));
                     }
                     else
                     {
@@ -1168,12 +1274,12 @@ private:
         constexpr Split(const str& s, const plain_str& pattern) : s(&s), pattern(pattern) {}
 
     public:
-        [[nodiscard]] constexpr auto begin() noexcept -> SplitIter
+        [[nodiscard]] constexpr auto begin() const noexcept -> SplitIter
         {
             return SplitIter(this->s, this->pattern);
         }
 
-        [[nodiscard]] constexpr auto end() noexcept -> SplitIter
+        [[nodiscard]] constexpr auto end() const noexcept -> SplitIter
         {
             return SplitIter(nullptr, this->pattern);
         }
@@ -1336,12 +1442,12 @@ private:
         constexpr explicit SplitASCIIWhiteSpace(const str& s) : s(&s) {}
 
     public:
-        [[nodiscard]] auto begin() noexcept -> SplitASCIIWhiteSpaceIter
+        [[nodiscard]] auto begin() const noexcept -> SplitASCIIWhiteSpaceIter
         {
             return SplitASCIIWhiteSpaceIter(this->s);
         }
 
-        [[nodiscard]] auto end() noexcept -> SplitASCIIWhiteSpaceIter
+        [[nodiscard]] auto end() const noexcept -> SplitASCIIWhiteSpaceIter
         {
             return SplitASCIIWhiteSpaceIter(nullptr);
         }
@@ -1396,12 +1502,12 @@ private:
                 return *this;
             }
 
-            constexpr auto operator->() noexcept -> pointer
+            constexpr auto operator->() const noexcept -> pointer
             {
                 return std::bit_cast<const Char*>(&this->ch);
             }
 
-            constexpr auto operator*() noexcept -> reference
+            constexpr auto operator*() const noexcept -> reference
             {
                 return this->ch;
             }
@@ -1414,12 +1520,12 @@ private:
 
         constexpr explicit Chars(const str& s) : s(&s) {}
 
-        auto begin() -> CharsIter
+        auto begin() const -> CharsIter
         {
             return CharsIter(this->s, 0);
         }
 
-        auto end() -> CharsIter
+        auto end() const -> CharsIter
         {
             return CharsIter(this->s, this->s->size());
         }
@@ -1467,7 +1573,7 @@ private:
                 std::size_t start_pos = this->pos;
 
                 // Get the first codepoint
-                const auto advance = utf8proc_iterate(
+                auto advance = utf8proc_iterate(
                     reinterpret_cast<const utf8proc_uint8_t*>(this->s->data() + this->pos),
                     this->s->size() - this->pos,
                     &codepoint1
@@ -1477,7 +1583,7 @@ private:
                 // Keep advancing until we find a grapheme break
                 while (this->pos < this->s->size())
                 {
-                    const auto advance = utf8proc_iterate(
+                    advance = utf8proc_iterate(
                         reinterpret_cast<const utf8proc_uint8_t*>(this->s->data() + this->pos),
                         this->s->size() - this->pos,
                         &codepoint2
@@ -1526,12 +1632,12 @@ private:
 
         constexpr explicit Graphemes(const str& s) : s(&s) {}
 
-        constexpr auto begin() -> GraphemesIter
+        [[nodiscard]] constexpr auto begin() const -> GraphemesIter
         {
             return GraphemesIter(this->s, 0);
         }
 
-        constexpr auto end() -> GraphemesIter
+        [[nodiscard]] constexpr auto end() const -> GraphemesIter
         {
             return GraphemesIter(this->s, this->s->size());
         }
@@ -1553,6 +1659,28 @@ public:
     [[nodiscard]] constexpr auto lines() const noexcept -> Lines
     {
         return Lines(*this);
+    }
+
+    /**
+     * @brief Returns an iterator that yields index of each match of the pattern in the str
+     * @param pattern The pattern to match against
+     * @return A Matches iterator that yields each match in the string
+     */
+    [[nodiscard]] constexpr auto matches(const str& pattern) const noexcept -> Matches
+    {
+        return Matches(*this, plain_str(pattern.m_data, pattern.m_len));
+    }
+
+    template<typename Alloc>
+    [[nodiscard]] constexpr auto matches(const raw::String<Alloc>& pattern) const noexcept -> Matches
+    {
+        return Matches(*this, plain_str(pattern.m_data, pattern.m_len));
+    }
+
+    [[nodiscard]] constexpr auto matches(const char* pattern) const noexcept -> Matches
+    {
+        const auto s = str::from(pattern).ok().expect_take("Invalid UTF-8 sequence while calling str::split#pattern");
+        return Matches(*this, plain_str(s.m_data, s.m_len));
     }
 
     /**
@@ -1842,7 +1970,7 @@ public:
      */
     [[nodiscard]] constexpr auto as_bytes() const noexcept -> std::span<const std::byte>
     {
-        return std::span<const std::byte>(
+        return std::span(
             reinterpret_cast<const std::byte*>(this->m_data),
         this->m_len
         );
@@ -2335,12 +2463,12 @@ template<typename Alloc>
 
 namespace literal
 {
-    [[nodiscard]] auto operator""_s(const char* str, std::size_t len) -> crab_cpp::str
+    [[nodiscard]] auto operator""_s(const char* str, std::size_t) -> crab_cpp::str
     {
-        return str::from_raw_parts(str, len).expect("Invalid UTF-8 sequence while calling operator\"\"_s");
+        return str::from(str).expect("Invalid UTF-8 sequence while calling operator\"\"_s");
     }
 
-    [[nodiscard]] auto operator""_S(const char* str, std::size_t len) -> String
+    [[nodiscard]] auto operator""_S(const char* str, std::size_t) -> String
     {
         return String::from(str).ok().expect_take("Invalid UTF-8 sequence while calling operator\"\"_S");
     }
@@ -2351,7 +2479,7 @@ namespace literal
 export template<>
 struct std::formatter<crab_cpp::Char> : std::formatter<std::uint32_t>
 {
-    auto format(const crab_cpp::Char& ch, std::format_context& ctx) const
+    static auto format(const crab_cpp::Char& ch, std::format_context& ctx)
     {
         return std::format_to(ctx.out(), "u{:x}", ch.code_point());
     }
@@ -2359,7 +2487,7 @@ struct std::formatter<crab_cpp::Char> : std::formatter<std::uint32_t>
 
 export auto operator<<(std::ostream& os, const crab_cpp::Char& ch) -> std::ostream&
 {
-    std::ios_base::fmtflags original_base = std::cout.flags() & std::ios_base::basefield;
+    const std::ios_base::fmtflags original_base = std::cout.flags() & std::ios_base::basefield;
     os << std::hex << "u" << ch.code_point();
     std::cout.flags(original_base);
 
@@ -2369,7 +2497,7 @@ export auto operator<<(std::ostream& os, const crab_cpp::Char& ch) -> std::ostre
 export template<>
 struct std::formatter<crab_cpp::str> : std::formatter<const char*>
 {
-    auto format(const crab_cpp::str& str, std::format_context& ctx) const
+    static auto format(const crab_cpp::str& str, std::format_context& ctx)
     {
         return std::format_to(ctx.out(), "{}", std::string_view(str.as_raw(), str.size()));
     }
@@ -2384,7 +2512,7 @@ export auto operator<<(std::ostream& os, const crab_cpp::str& str) -> std::ostre
 export template<typename Alloc>
 struct std::formatter<crab_cpp::raw::String<Alloc>> : std::formatter<const char*>
 {
-    auto format(const crab_cpp::raw::String<Alloc>& str, std::format_context& ctx) const
+    static auto format(const crab_cpp::raw::String<Alloc>& str, std::format_context& ctx)
     {
         return std::format_to(ctx.out(), "{}", std::string_view(reinterpret_cast<const char*>(str.data()), str.size()));
     }

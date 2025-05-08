@@ -50,7 +50,7 @@ struct Result : std::variant<T, E>
      * @brief Returns true if the result is Ok
      * @return true if the result is Ok, false otherwise
      */
-    auto is_ok() const -> bool
+    [[nodiscard]] auto is_ok() const -> bool
     {
         return this->index() == 0;
     }
@@ -59,7 +59,7 @@ struct Result : std::variant<T, E>
      * @brief Returns true if the result is Err
      * @return true if the result is Err, false otherwise
      */
-    auto is_err() const -> bool
+    [[nodiscard]] auto is_err() const -> bool
     {
         return !this->is_ok();
     }
