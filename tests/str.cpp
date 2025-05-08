@@ -23,7 +23,7 @@ TEST(StringTest, StrConstruction)
     auto world_str = str::from("World").unwrap();
     EXPECT_FALSE(world_str.empty());
     EXPECT_EQ(world_str.size(), 5);
-    EXPECT_EQ(world_str.as_raw(), "World");
+    EXPECT_EQ(std::strcmp(world_str.as_raw(), "World"), 0);
 
     // Test invalid UTF-8
     const char invalid_utf8[] = {'\xC0', '\x80', 0}; // Invalid UTF-8 sequence

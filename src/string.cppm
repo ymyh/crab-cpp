@@ -63,9 +63,9 @@ public:
         const std::byte* ptr = nullptr;
 
     public:
-        explicit Iter() = default;
+        constexpr explicit Iter() = default;
 
-        explicit Iter(const std::byte* ptr) : ptr(ptr) {}
+        constexpr explicit Iter(const std::byte* ptr) : ptr(ptr) {}
 
     public:
         constexpr auto operator++() noexcept -> Iter&
@@ -354,12 +354,12 @@ public:
 public:
     constexpr auto begin() const noexcept -> const std::byte*
     {
-        return reinterpret_cast<const std::byte*>(this->m_data);
+        return std::bit_cast<const std::byte*>(this->m_data);
     }
 
     constexpr auto end() const noexcept -> const std::byte*
     {
-        return reinterpret_cast<const std::byte*>(this->m_data + this->m_len);
+        return std::bit_cast<const std::byte*>(this->m_data + this->m_len);
     }
 
     /**
@@ -1252,7 +1252,7 @@ private:
                 }
             }
 
-            constexpr auto operator++() noexcept -> SplitASCIIWhiteSpaceIter&
+            auto operator++() noexcept -> SplitASCIIWhiteSpaceIter&
             {
                 if (this->s == nullptr)
                 {
@@ -1309,7 +1309,7 @@ private:
                 return *this;
             }
 
-            [[nodiscard]] constexpr auto operator++(int) noexcept -> SplitASCIIWhiteSpaceIter
+            [[nodiscard]] auto operator++(int) noexcept -> SplitASCIIWhiteSpaceIter
             {
                 SplitASCIIWhiteSpaceIter temp = *this;
                 ++(*this);
@@ -1336,12 +1336,12 @@ private:
         constexpr explicit SplitASCIIWhiteSpace(const str& s) : s(&s) {}
 
     public:
-        [[nodiscard]] constexpr auto begin() noexcept -> SplitASCIIWhiteSpaceIter
+        [[nodiscard]] auto begin() noexcept -> SplitASCIIWhiteSpaceIter
         {
             return SplitASCIIWhiteSpaceIter(this->s);
         }
 
-        [[nodiscard]] constexpr auto end() noexcept -> SplitASCIIWhiteSpaceIter
+        [[nodiscard]] auto end() noexcept -> SplitASCIIWhiteSpaceIter
         {
             return SplitASCIIWhiteSpaceIter(nullptr);
         }
@@ -1368,7 +1368,7 @@ private:
 
             constexpr explicit CharsIter() noexcept = default;
 
-            constexpr explicit CharsIter(const str* s, size_t pos) noexcept : s(s), pos(pos)
+            explicit CharsIter(const str* s, size_t pos) noexcept : s(s), pos(pos)
             {
                 const auto advance = utf8proc_iterate(
                     reinterpret_cast<const utf8proc_uint8_t*>(this->s->data() + this->pos),
@@ -1398,7 +1398,7 @@ private:
 
             constexpr auto operator->() noexcept -> pointer
             {
-                return reinterpret_cast<const Char*>(&this->ch);
+                return std::bit_cast<const Char*>(&this->ch);
             }
 
             constexpr auto operator*() noexcept -> reference
@@ -1414,12 +1414,12 @@ private:
 
         constexpr explicit Chars(const str& s) : s(&s) {}
 
-        constexpr auto begin() -> CharsIter
+        auto begin() -> CharsIter
         {
             return CharsIter(this->s, 0);
         }
 
-        constexpr auto end() -> CharsIter
+        auto end() -> CharsIter
         {
             return CharsIter(this->s, this->s->size());
         }
@@ -1582,7 +1582,7 @@ public:
      * @return A Split iterator that yields each part of the split string
      * @panics If pattern is not a valid UTF-8 sequence
      */
-    [[nodiscard]] constexpr auto split(const char* pattern) const noexcept -> Split
+    [[nodiscard]] auto split(const char* pattern) const noexcept -> Split
     {
         const auto s = str::from(pattern).ok().expect_take("Invalid UTF-8 sequence while calling str::split#pattern");
         return Split(*this, plain_str(s.m_data, s.m_len));
@@ -1660,7 +1660,7 @@ namespace strings
         return std::views::join_with(static_cast<std::byte>(ch));
     }
 
-    constexpr auto join_with(const char* str) -> decltype(auto)
+    auto join_with(const char* str) -> decltype(auto)
     {
         const auto s = str::from(str).expect("Invalid UTF-8 sequence while calling strings::join_with#str");
         return std::views::join_with(s.as_bytes());
@@ -2304,7 +2304,7 @@ template<typename Alloc>
 }
 
 template<typename Alloc>
-[[nodiscard]] constexpr auto operator==(const raw::String<Alloc>& lhs, const char* rhs) noexcept -> bool
+[[nodiscard]] auto operator==(const raw::String<Alloc>& lhs, const char* rhs) noexcept -> bool
 {
     if (lhs.size() != std::strlen(rhs))
     {
@@ -2314,12 +2314,12 @@ template<typename Alloc>
 }
 
 template<typename Alloc>
-[[nodiscard]] constexpr auto operator==(const char* lhs, const raw::String<Alloc>& rhs) noexcept -> bool
+[[nodiscard]] auto operator==(const char* lhs, const raw::String<Alloc>& rhs) noexcept -> bool
 {
     return rhs == lhs;
 }
 
-[[nodiscard]] constexpr auto operator==(const str& lhs, const char* rhs) noexcept -> bool
+[[nodiscard]] auto operator==(const str& lhs, const char* rhs) noexcept -> bool
 {
     if (lhs.size() != std::strlen(rhs))
     {
@@ -2328,19 +2328,19 @@ template<typename Alloc>
     return std::equal(lhs.data(), lhs.data() + lhs.size(), reinterpret_cast<const std::byte*>(rhs));
 }
 
-[[nodiscard]] constexpr auto operator==(const char* lhs, const str& rhs) noexcept -> bool
+[[nodiscard]] auto operator==(const char* lhs, const str& rhs) noexcept -> bool
 {
     return rhs == lhs;
 }
 
 namespace literal
 {
-    [[nodiscard]] constexpr auto operator""_s(const char* str, std::size_t len) -> crab_cpp::str
+    [[nodiscard]] auto operator""_s(const char* str, std::size_t len) -> crab_cpp::str
     {
         return str::from_raw_parts(str, len).expect("Invalid UTF-8 sequence while calling operator\"\"_s");
     }
 
-    [[nodiscard]] constexpr auto operator""_S(const char* str, std::size_t len) -> String
+    [[nodiscard]] auto operator""_S(const char* str, std::size_t len) -> String
     {
         return String::from(str).ok().expect_take("Invalid UTF-8 sequence while calling operator\"\"_S");
     }
@@ -2400,26 +2400,26 @@ auto operator<<(std::ostream& os, const crab_cpp::raw::String<Alloc>& str) -> st
 export template<>
 struct std::hash<crab_cpp::Char>
 {
-    static auto operator()(const crab_cpp::Char& ch) noexcept -> size_t
+    auto operator()(const crab_cpp::Char& ch) const noexcept -> size_t
     {
-		return std::hash<std::uint32_t>::operator()(ch.code_point());
+		return std::hash<std::uint32_t>{}(ch.code_point());
 	}
 };
 
 export template<>
 struct std::hash<crab_cpp::str>
 {
-    static auto operator()(const crab_cpp::str& str) noexcept -> size_t
+    auto operator()(const crab_cpp::str& str) const noexcept -> size_t
     {
-		return std::hash<std::string_view>::operator()(std::string_view(str.as_raw(), str.size()));
+		return std::hash<std::string_view>{}(std::string_view(str.as_raw(), str.size()));
 	}
 };
 
 export template<typename Alloc>
 struct std::hash<crab_cpp::raw::String<Alloc>>
 {
-    static auto operator()(const crab_cpp::raw::String<Alloc>& str) noexcept -> size_t
+    auto operator()(const crab_cpp::raw::String<Alloc>& str) noexcept -> size_t
     {
-		return std::hash<std::string_view>::operator()(std::string_view(reinterpret_cast<const char*>(str.data()), str.size()));
+		return std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char*>(str.data()), str.size()));
 	}
 };
