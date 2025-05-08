@@ -1063,6 +1063,115 @@ private:
         }
     };
 
+    struct Matches
+    {
+        struct MatchesIter
+        {
+            using iterator_category = std::forward_iterator_tag;
+            using difference_type = std::ptrdiff_t;
+            using value_type = std::size_t;
+            using pointer = const std::size_t*;
+            using reference = const std::size_t&;
+
+            const str* s = nullptr;
+            plain_str pattern;
+            std::size_t match_pos = 0;
+            std::size_t pos = 0;
+
+            constexpr MatchesIter() noexcept = default;
+
+            constexpr MatchesIter(const str* s, const plain_str& pattern) noexcept : s(s), pattern(pattern)
+            {
+                if (s != nullptr)
+                {
+                    // Find the first match
+                    auto ptr = std::search(s->m_data, s->m_data + s->m_len, pattern.data, pattern.data + pattern.len);
+                    if (ptr != s->m_data + s->m_len && pattern.len > 0)
+                    {
+                        const auto match_pos = ptr - s->m_data;
+                        this->match_pos = match_pos;
+                        this->pos = match_pos + pattern.len;
+                    }
+                    else
+                    {
+                        // No match found, set to end iterator
+                        this->s = nullptr;
+                    }
+                }
+            }
+
+            [[nodiscard]] constexpr auto operator*() const noexcept -> reference
+            {
+                return this->match_pos;
+            }
+
+            [[nodiscard]] constexpr auto operator->() const noexcept -> pointer
+            {
+                return &this->match_pos;
+            }
+
+            constexpr auto operator++() noexcept -> MatchesIter&
+            {
+                if (this->s == nullptr)
+                {
+                    return *this;
+                }
+
+                // Search for the next match starting from the position after the last match
+                auto ptr = std::search(
+                    this->s->m_data + this->pos,
+                    this->s->m_data + this->s->m_len,
+                    this->pattern.data,
+                    this->pattern.data + this->pattern.len
+                );
+
+                if (ptr != this->s->m_data + this->s->m_len)
+                {
+                    const auto match_pos = ptr - this->s->m_data;
+                    this->match_pos = match_pos;
+                    this->pos = match_pos + this->pattern.len;
+                }
+                else
+                {
+                    // No more matches, set to end iterator
+                    this->s = nullptr;
+                }
+
+                return *this;
+            }
+
+            constexpr auto operator++(int) noexcept -> MatchesIter
+            {
+                MatchesIter temp = *this;
+                ++(*this);
+                return temp;
+            }
+
+            [[nodiscard]] constexpr auto operator==(const MatchesIter& other) const noexcept -> bool
+            {
+                return this->s == other.s;
+            }
+        };
+
+        const str* s;
+        plain_str pattern;
+
+        constexpr Matches(const str& s, const plain_str& pattern) : s(&s), pattern(pattern) {}
+
+        [[nodiscard]] constexpr auto begin() const noexcept -> MatchesIter
+        {
+            return MatchesIter(this->s, this->pattern);
+        }
+
+        [[nodiscard]] constexpr auto end() const noexcept -> MatchesIter
+        {
+            return MatchesIter(nullptr, this->pattern);
+        }
+
+        using iterator = MatchesIter;
+        using const_iterator = MatchesIter;
+    };
+
     struct Split
     {
         struct SplitIter
@@ -1550,6 +1659,28 @@ public:
     [[nodiscard]] constexpr auto lines() const noexcept -> Lines
     {
         return Lines(*this);
+    }
+
+    /**
+     * @brief Returns an iterator that yields index of each match of the pattern in the str
+     * @param pattern The pattern to match against
+     * @return A Matches iterator that yields each match in the string
+     */
+    [[nodiscard]] constexpr auto matches(const str& pattern) const noexcept -> Matches
+    {
+        return Matches(*this, plain_str(pattern.m_data, pattern.m_len));
+    }
+
+    template<typename Alloc>
+    [[nodiscard]] constexpr auto matches(const raw::String<Alloc>& pattern) const noexcept -> Matches
+    {
+        return Matches(*this, plain_str(pattern.m_data, pattern.m_len));
+    }
+
+    [[nodiscard]] constexpr auto matches(const char* pattern) const noexcept -> Matches
+    {
+        const auto s = str::from(pattern).ok().expect_take("Invalid UTF-8 sequence while calling str::split#pattern");
+        return Matches(*this, plain_str(s.m_data, s.m_len));
     }
 
     /**

@@ -431,3 +431,51 @@ TEST(StringTest, JoinWith)
     auto s = str::from("hello,world").unwrap();
     EXPECT_EQ(s.split(",") | strings::join_with(".") | std::ranges::to<String>(), "hello.world"_s);
 }
+
+TEST(StringTest, StrMatches)
+{
+    // Test basic pattern matching
+    auto text = str::from("Hello World Hello").unwrap();
+    auto pattern = str::from("Hello").unwrap();
+    auto matches = text.matches(pattern);
+    auto it = matches.begin();
+
+    EXPECT_EQ(*it, 0);
+    ++it;
+    EXPECT_EQ(*it, 12);
+    ++it;
+    EXPECT_EQ(it, matches.end());
+
+    // Test no matches
+    auto no_matches = text.matches(str::from("xyz").unwrap());
+    EXPECT_EQ(no_matches.begin(), no_matches.end());
+
+    // Test empty pattern
+    auto empty_pattern = str::from("").unwrap();
+    auto empty_matches = text.matches(empty_pattern);
+    EXPECT_EQ(empty_matches.begin(), empty_matches.end());
+
+    // Test pattern at start and end
+    auto start_end = str::from("abcabc").unwrap();
+    auto abc = str::from("abc").unwrap();
+    auto abc_matches = start_end.matches(abc);
+    it = abc_matches.begin();
+
+    EXPECT_EQ(*it, 0);
+    ++it;
+    EXPECT_EQ(*it, 3);
+    ++it;
+    EXPECT_EQ(it, abc_matches.end());
+
+    // Test UTF-8 pattern matching
+    auto utf8_text = str::from("你好世界你好").unwrap();
+    auto utf8_pattern = str::from("你好").unwrap();
+    auto utf8_matches = utf8_text.matches(utf8_pattern);
+    it = utf8_matches.begin();
+
+    EXPECT_EQ(*it, 0);
+    ++it;
+    EXPECT_EQ(*it, 12);
+    ++it;
+    EXPECT_EQ(it, utf8_matches.end());
+}
