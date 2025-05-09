@@ -683,12 +683,28 @@ public:
         return result;
     }
 
+    /**
+     * @brief Replaces all matches of a pattern with another str.
+     * replace creates a new String, and copies the data from this str into it.
+     * While doing so, it attempts to find matches of a pattern. If it finds any, it replaces them with the replacement str.
+     * @param pattern The pattern to search for
+     * @param replacement
+     * @returns a new String
+     */
     template<typename Alloc = std::allocator<std::byte>>
     constexpr auto replace(const str& pattern, const str& replacement) const -> raw::String<Alloc>
     {
         return this->replace_n<Alloc>(pattern, replacement, std::numeric_limits<std::size_t>::max());
     }
 
+    /**
+     * @brief Replaces all matches of a pattern with another str.
+     * replace creates a new String, and copies the data from this str into it.
+     * While doing so, it attempts to find matches of a pattern. If it finds any, it replaces them with the replacement str.
+     * @param pattern The pattern to search for
+     * @param replacement
+     * @returns a new String
+     */
     template<typename Alloc = std::allocator<std::byte>>
     constexpr auto replace(const char* pattern, const char* replacement) const -> raw::String<Alloc>
     {
@@ -696,6 +712,15 @@ public:
             str::from(replacement).expect("Invalid UTF-8 sequence while calling String::replace#replacement"));
     }
 
+    /**
+     * @brief Replaces first N matches of a pattern with another string.
+     * replacen creates a new String, and copies the data from this string slice into it.
+     * While doing so, it attempts to find matches of a pattern. If it finds any, it replaces them with the replacement string slice at most `n` times.
+     * @param pattern
+     * @param replacement
+     * @param n
+     * @returns a new String
+     */
     template<typename Alloc = std::allocator<std::byte>>
     constexpr auto replace_n(const str& pattern, const str& replacement, std::size_t n) const -> raw::String<Alloc>
     {
@@ -746,6 +771,11 @@ public:
         return string;
     }
 
+    /**
+     * @brief Returns the byte index for the first character of the last match of the pattern in this str slice.
+     * @param pattern The pattern to search for
+     * @returns `None` if the pattern doesn’t match.
+     */
     [[nodiscard]] constexpr auto rfind(const str& pattern) const noexcept -> Option<std::size_t>
     {
         if (pattern.m_len > this->m_len || pattern.m_len == 0)
@@ -766,6 +796,11 @@ public:
         return size_t(std::distance(haystack.begin(), result.begin()));
     }
 
+    /**
+     * @brief Returns the byte index for the first character of the last match of the pattern in this str slice.
+     * @param pattern The pattern to search for
+     * @returns `None` if the pattern doesn’t match.
+     */
     [[nodiscard]] constexpr auto rfind(const char* pattern) const noexcept -> Option<std::size_t>
     {
         return this->rfind(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::rfind#pattern"));
@@ -2546,7 +2581,7 @@ struct std::hash<crab_cpp::str>
 export template<typename Alloc>
 struct std::hash<crab_cpp::raw::String<Alloc>>
 {
-    auto operator()(const crab_cpp::raw::String<Alloc>& str) noexcept -> size_t
+    auto operator()(const crab_cpp::raw::String<Alloc>& str) const noexcept -> size_t
     {
 		return std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char*>(str.data()), str.size()));
 	}
