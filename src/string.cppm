@@ -1,6 +1,6 @@
 module;
 
-#include "include/utf8proc.h"
+#include "utf8proc.h"
 
 export module crab_cpp:string;
 
@@ -2366,7 +2366,7 @@ public:
             this->reserve(new_len - this->m_alloc_and_capacity.second);
         }
 
-        std::copy(str.data(), str.data() + str.size(), this->m_data + this->m_len);
+        std::copy(str.data(), str.data() + str.size(), this->m_data + this->m_len); 
         this->m_len = new_len;
         // Add null terminator
         this->m_data[this->m_len] = std::byte{0};
