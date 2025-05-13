@@ -9,7 +9,6 @@ target("crab_cpp")
     add_packages("utf8proc")
 
     add_files("src/*.cppm", {public = true})
-    -- add_files("src/*.c", {public = true})
 
     add_defines("CRAB_CPP_ENABLE_STRING", "UTF8PROC_STATIC")
     add_includedirs("include", ".")
@@ -30,7 +29,6 @@ target("crab_cpp_dev")
     add_packages("utf8proc")
 
     add_files("src/*.cppm", {public = true})
-    -- add_files("src/*.c")
     add_files("main.cpp")
 
     add_defines("CRAB_CPP_ENABLE_STRING", "UTF8PROC_STATIC")
@@ -52,7 +50,6 @@ target("crab_cpp_test")
     add_packages("utf8proc", "gtest")
 
     add_files("src/*.cppm", {public = true})
-    -- add_files("src/*.c")
     add_files("tests/*.cpp")
 
     add_defines("CRAB_CPP_ENABLE_STRING", "UTF8PROC_STATIC")

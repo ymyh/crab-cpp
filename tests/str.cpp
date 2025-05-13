@@ -36,6 +36,7 @@ TEST(StringTest, StrComparison)
 {
     auto hello1 = str::from("Hello").unwrap();
     auto hello2 = str::from("Hello").unwrap();
+    auto hello3 = str::from("hello").unwrap();
     auto world = str::from("World").unwrap();
     auto hello_world = str::from("Hello World").unwrap();
 
@@ -47,6 +48,10 @@ TEST(StringTest, StrComparison)
     EXPECT_LT(hello1, world);
     EXPECT_GT(world, hello1);
     EXPECT_LT(hello1, hello_world);
+
+    // Test eq_ignore_ascii
+    EXPECT_TRUE(hello1.eq_ignore_ascii_case(hello3));
+    EXPECT_TRUE(hello3.eq_ignore_ascii_case(hello1));
 }
 
 TEST(StringTest, StrOperations)

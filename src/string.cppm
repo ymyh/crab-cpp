@@ -482,6 +482,43 @@ public:
     }
 
     /**
+     * @brief Checks that two strings are an ASCII case-insensitive match.
+     * Same as to_ascii_lowercase(a) == to_ascii_lowercase(b), but without allocating and copying temporaries.
+     */
+    [[nodiscard]] auto eq_ignore_ascii_case(const str& s) const noexcept -> bool
+    {
+        constexpr std::uint8_t ASCII[] {
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
+            26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49,
+            50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 97, 98, 99, 100, 101, 102, 103,
+            104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121,
+            122, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109,
+            110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127
+        };
+
+        if (this->size() != s.size())
+        {
+            return false;
+        }
+
+        for (size_t i = 0; i < this->size(); i += 1)
+        {
+            if (this->m_data[i] != s.m_data[i])
+            {
+                if (static_cast<std::uint8_t>(this->m_data[i]) < 128 && static_cast<std::uint8_t>(s.m_data[i]) < 128)
+                {
+                    if (ASCII[static_cast<std::uint8_t>(this->m_data[i])] != ASCII[static_cast<std::uint8_t>(s.m_data[i])])
+                    {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
      * @brief Creates a new String by repeating a string n times.
      * @param n The number of times to repeat the string
      * @panics This function will panic if the capacity would overflow.
@@ -1712,7 +1749,7 @@ public:
         return Matches(*this, plain_str(pattern.m_data, pattern.m_len));
     }
 
-    [[nodiscard]] constexpr auto matches(const char* pattern) const noexcept -> Matches
+    [[nodiscard]] auto matches(const char* pattern) const noexcept -> Matches
     {
         const auto s = str::from(pattern).ok().expect_take("Invalid UTF-8 sequence while calling str::split#pattern");
         return Matches(*this, plain_str(s.m_data, s.m_len));
