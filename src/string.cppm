@@ -2548,7 +2548,7 @@ namespace literal
 
 }
 
-export template<>
+template<>
 struct std::formatter<crab_cpp::Char> : std::formatter<std::uint32_t>
 {
     static auto format(const crab_cpp::Char& ch, std::format_context& ctx)
@@ -2566,7 +2566,7 @@ export auto operator<<(std::ostream& os, const crab_cpp::Char& ch) -> std::ostre
     return os;
 }
 
-export template<>
+template<>
 struct std::formatter<crab_cpp::str> : std::formatter<const char*>
 {
     static auto format(const crab_cpp::str& str, std::format_context& ctx)
@@ -2581,7 +2581,7 @@ export auto operator<<(std::ostream& os, const crab_cpp::str& str) -> std::ostre
     return os;
 }
 
-export template<typename Alloc>
+template<typename Alloc>
 struct std::formatter<crab_cpp::raw::String<Alloc>> : std::formatter<const char*>
 {
     static auto format(const crab_cpp::raw::String<Alloc>& str, std::format_context& ctx)
@@ -2597,7 +2597,7 @@ auto operator<<(std::ostream& os, const crab_cpp::raw::String<Alloc>& str) -> st
     return os;
 }
 
-export template<>
+template<>
 struct std::hash<crab_cpp::Char>
 {
     auto operator()(const crab_cpp::Char& ch) const noexcept -> size_t
@@ -2606,7 +2606,7 @@ struct std::hash<crab_cpp::Char>
 	}
 };
 
-export template<>
+template<>
 struct std::hash<crab_cpp::str>
 {
     auto operator()(const crab_cpp::str& str) const noexcept -> size_t
@@ -2615,7 +2615,7 @@ struct std::hash<crab_cpp::str>
 	}
 };
 
-export template<typename Alloc>
+template<typename Alloc>
 struct std::hash<crab_cpp::raw::String<Alloc>>
 {
     auto operator()(const crab_cpp::raw::String<Alloc>& str) const noexcept -> size_t
