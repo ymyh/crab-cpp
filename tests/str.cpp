@@ -36,7 +36,6 @@ TEST(StringTest, StrComparison)
 {
     auto hello1 = str::from("Hello").unwrap();
     auto hello2 = str::from("Hello").unwrap();
-    auto hello3 = str::from("hello").unwrap();
     auto world = str::from("World").unwrap();
     auto hello_world = str::from("Hello World").unwrap();
 
@@ -50,8 +49,21 @@ TEST(StringTest, StrComparison)
     EXPECT_LT(hello1, hello_world);
 
     // Test eq_ignore_ascii
-    EXPECT_TRUE(hello1.eq_ignore_ascii_case(hello3));
-    EXPECT_TRUE(hello3.eq_ignore_ascii_case(hello1));
+    {
+        auto upper = str::from("ABCDEFGHIJKLMNOPQRSTUVWXYZ").unwrap();
+        auto lower = str::from("abcdefghijklmnopqrstuvwxyz").unwrap();
+
+        EXPECT_TRUE(upper.eq_ignore_ascii_case(lower));
+        EXPECT_TRUE(lower.eq_ignore_ascii_case(upper));
+    }
+
+    {
+        auto a = str::from("Résumé").unwrap();
+        auto b = str::from("rÉsumé").unwrap();
+
+        EXPECT_TRUE(a.eq_ignore_ascii_case(b));
+        EXPECT_TRUE(a.eq_ignore_ascii_case(b));
+    }
 }
 
 TEST(StringTest, StrOperations)

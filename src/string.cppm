@@ -170,26 +170,25 @@ struct FromUtf8Error
 struct Char
 {
 private:
-    std::uint32_t m_value;
+    std::uint32_t m_value = 0;
 
 public:
     /**
      * @brief Default constructor
      */
-    constexpr explicit Char() noexcept : m_value(0) {}
+    constexpr explicit Char() noexcept = default;
 
     /**
      * @brief Constructs a Char from a Unicode scalar value
      * @param value The Unicode scalar value
      * @panics If the value is not a valid Unicode scalar value
      */
-    constexpr explicit Char(std::uint32_t value)
+    constexpr explicit Char(std::uint32_t value) : m_value(value)
     {
         if (!is_valid_scalar_value(value))
         {
             panic("Invalid Unicode scalar value");
         }
-        this->m_value = value;
     }
 
 private:
@@ -348,8 +347,6 @@ public:
      */
     constexpr str(const plain_str& s) noexcept : m_data(s.data), m_len(s.len) {}
 
-    constexpr str(char ch) noexcept {}
-
 public:
     [[nodiscard]] constexpr auto begin() const noexcept -> const std::byte*
     {
@@ -487,7 +484,7 @@ public:
      */
     [[nodiscard]] auto eq_ignore_ascii_case(const str& s) const noexcept -> bool
     {
-        constexpr std::uint8_t ASCII[] {
+        constexpr std::uint8_t ASCII_ignore_case[] {
             0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
             26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49,
             50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 97, 98, 99, 100, 101, 102, 103,
@@ -507,7 +504,7 @@ public:
             {
                 if (static_cast<std::uint8_t>(this->m_data[i]) < 128 && static_cast<std::uint8_t>(s.m_data[i]) < 128)
                 {
-                    if (ASCII[static_cast<std::uint8_t>(this->m_data[i])] != ASCII[static_cast<std::uint8_t>(s.m_data[i])])
+                    if (ASCII_ignore_case[static_cast<std::uint8_t>(this->m_data[i])] != ASCII_ignore_case[static_cast<std::uint8_t>(s.m_data[i])])
                     {
                         return false;
                     }
@@ -1014,12 +1011,12 @@ private:
                 {
                     // Initialize the first line
                     auto bytes = s->as_bytes();
-                    std::size_t start = 0;
                     std::size_t pos = 0;
 
                     // Find the first line ending
                     while (pos < bytes.size())
                     {
+                        std::size_t start = 0;
                         if (bytes[pos] == std::byte{'\n'})
                         {
                             span = plain_str(bytes.data() + start, pos - start);
@@ -1028,7 +1025,8 @@ private:
 
                             break;
                         }
-                        else if (bytes[pos] == std::byte{'\r'} && pos + 1 < bytes.size() && bytes[pos + 1] == std::byte{'\n'})
+
+                        if (bytes[pos] == std::byte{'\r'} && pos + 1 < bytes.size() && bytes[pos + 1] == std::byte{'\n'})
                         {
                             span = plain_str(bytes.data() + start, pos - start);
                             pos += 2; // Skip \r\n
@@ -1548,13 +1546,11 @@ private:
 
             explicit CharsIter(const str* s, size_t pos) noexcept : s(s), pos(pos)
             {
-                const auto advance = utf8proc_iterate(
+                this->pos += utf8proc_iterate(
                     reinterpret_cast<const utf8proc_uint8_t*>(this->s->data() + this->pos),
                     this->s->size() - this->pos,
                     reinterpret_cast<utf8proc_int32_t*>(&this->ch)
                 );
-
-                this->pos += advance;
             }
 
             constexpr auto operator++() noexcept -> CharsIter&
@@ -1564,12 +1560,11 @@ private:
                     return *this;
                 }
 
-                const auto advance = utf8proc_iterate(
+                this->pos += utf8proc_iterate(
                     reinterpret_cast<const utf8proc_uint8_t*>(this->s->data() + this->pos),
                     this->s->size() - this->pos,
                     reinterpret_cast<utf8proc_int32_t*>(&this->ch)
                 );
-                this->pos += advance;
 
                 return *this;
             }
@@ -1752,7 +1747,7 @@ public:
     [[nodiscard]] auto matches(const char* pattern) const noexcept -> Matches
     {
         const auto s = str::from(pattern).ok().expect_take("Invalid UTF-8 sequence while calling str::split#pattern");
-        return Matches(*this, plain_str(s.m_data, s.m_len));
+        return Matches(*this, plain_str(s.data(), s.size()));
     }
 
     /**

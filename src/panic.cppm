@@ -6,10 +6,23 @@ export namespace crab_cpp
     /**
      * Prints a message then call std::terminate.
      */
-    template<typename ...Types>
     [[noreturn]] auto panic() noexcept -> void
     {
         std::println(std::cerr, "Panic encountered.");
+
+        #ifdef CRAB_CPP_ENABLE_BACKTRACE
+            std::println(std::cerr, "{}", std::stacktrace::current());
+        #endif
+
+        std::terminate();
+    }
+
+    /**
+     * Prints a message then call std::terminate.
+     */
+    [[noreturn]] auto panic(std::string_view str) noexcept -> void
+    {
+        std::println(std::cerr, "Panic encountered: {}", str);
 
         #ifdef CRAB_CPP_ENABLE_BACKTRACE
             std::println(std::cerr, "{}", std::stacktrace::current());
@@ -35,24 +48,9 @@ export namespace crab_cpp
     }
 
     /**
-     * Prints a message then call std::terminate.
-     */
-    [[noreturn]] auto panic(std::string_view str) -> void
-    {
-        std::println(std::cerr, "Panic encountered: {}", str);
-
-        #ifdef CRAB_CPP_ENABLE_BACKTRACE
-            std::println(std::cerr, "{}", std::stacktrace::current());
-        #endif
-
-        std::terminate();
-    }
-
-    /**
      * Prints a message then call panic.
      */
-    template<typename ...Types>
-    [[noreturn]] auto unimplemented() -> void
+    [[noreturn]] auto unimplemented() noexcept -> void
     {
        std::println(std::cerr, "Unimplemented yet.");
        panic();
@@ -62,7 +60,7 @@ export namespace crab_cpp
      * Prints a message then call panic.
      */
     template<typename ...Types>
-    [[noreturn]] auto unimplemented(std::format_string<Types...> format, Types&& ...args) -> void
+    [[noreturn]] auto unimplemented(std::format_string<Types...> format, Types&& ...args) noexcept -> void
     {
        std::println(std::cerr, "Unimplemented yet.");
        panic(format, std::forward<Types>(args)...);
@@ -71,7 +69,7 @@ export namespace crab_cpp
     /**
      * Prints a message then call panic.
      */
-    [[noreturn]] auto unimplemented(std::string_view str) -> void
+    [[noreturn]] auto unimplemented(std::string_view str) noexcept -> void
     {
         std::println(std::cerr, "Unimplemented yet.");
         panic(str);

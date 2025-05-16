@@ -3,6 +3,7 @@ add_requires("gtest", {configs = {main = true}})
 add_requires("utf8proc")
 
 target("crab_cpp")
+    set_default(true)
     set_kind("static")
     set_languages("c++23", "c11")
     set_policy("build.c++.modules", true, {public = true})
@@ -23,6 +24,7 @@ target("crab_cpp")
     end
 
 target("crab_cpp_dev")
+    set_default(false)
     set_kind("binary")
     set_languages("c++23", "c11")
     set_policy("build.c++.modules", true)
@@ -44,6 +46,7 @@ target("crab_cpp_dev")
     end
 
 target("crab_cpp_test")
+    set_default(false)
     set_kind("binary")
     set_languages("c++23", "c11")
     set_policy("build.c++.modules", true)
