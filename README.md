@@ -3,6 +3,7 @@
 - [Crab\_cpp: Rust-like Struct and Function in C++23](#crab_cpp-rust-like-struct-and-function-in-c23)
   - [Overview](#overview)
   - [How to Compile](#how-to-compile)
+  - [Compiler Requirement](#compiler-requirement)
   - [Features \& Usage](#features--usage)
     - [panic \& unimplemented](#panic--unimplemented)
     - [Option \<T\>](#option-t)
@@ -19,6 +20,11 @@ Crab_cpp is a C++23 library that simulates Rust's Option<T>, Result<T, E>, panic
 
 ### How to Compile
 Currently use [xmake](https://github.com/xmake-io/xmake) to compile this library. Welcome to contribute if you need more build systems.
+
+### Compiler Requirement
+gcc >= 15
+msvc >= 1943
+clang >= 18 /clang-cl >= 19.1.1
 
 ### Features & Usage
 
@@ -187,8 +193,8 @@ Compared to existing corresponding classes, Crab_cpp offers
 ### Todos
 - Support C++20
 - Implement more methods
-- Complete tests for the first release
 
 ### Thanks
 [utf8proc](https://github.com/JuliaStrings/utf8proc): Provide utf8 process.
+
 [Google Test](https://github.com/google/googletest): For testing.
