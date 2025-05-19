@@ -48,7 +48,7 @@ TEST(StringTest, StrComparison)
     EXPECT_GT(world, hello1);
     EXPECT_LT(hello1, hello_world);
 
-    // Test eq_ignore_ascii
+    // Test eq_ignore_ascii_case
     {
         auto upper = str::from("ABCDEFGHIJKLMNOPQRSTUVWXYZ").unwrap();
         auto lower = str::from("abcdefghijklmnopqrstuvwxyz").unwrap();
@@ -61,8 +61,8 @@ TEST(StringTest, StrComparison)
         auto a = str::from("Résumé").unwrap();
         auto b = str::from("rÉsumé").unwrap();
 
-        EXPECT_TRUE(a.eq_ignore_ascii_case(b));
-        EXPECT_TRUE(a.eq_ignore_ascii_case(b));
+        EXPECT_FALSE(a.eq_ignore_ascii_case(b));
+        EXPECT_FALSE(b.eq_ignore_ascii_case(a));
     }
 }
 
