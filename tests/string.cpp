@@ -1,3 +1,5 @@
+#ifdef CRAB_CPP_ENABLE_STRING
+
 #include <gtest/gtest.h>
 
 import crab_cpp;
@@ -268,3 +270,5 @@ TEST(StringTest, ComparisonOperators)
     EXPECT_TRUE(s1 > String());
     EXPECT_TRUE(String() < s1);
 }
+
+#endif

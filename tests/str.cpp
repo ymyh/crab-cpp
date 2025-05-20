@@ -1,3 +1,5 @@
+#ifdef CRAB_CPP_ENABLE_STRING
+
 #include <gtest/gtest.h>
 
 import crab_cpp;
@@ -496,3 +498,5 @@ TEST(StringTest, StrMatches)
     ++it;
     EXPECT_EQ(it, utf8_matches.end());
 }
+
+#endif
