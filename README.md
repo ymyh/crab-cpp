@@ -2,8 +2,9 @@
 - [Table of Contents](#table-of-contents)
 - [Crab\_cpp: Rust-like Struct and Function in C++23](#crab_cpp-rust-like-struct-and-function-in-c23)
   - [Overview](#overview)
-  - [How to Compile](#how-to-compile)
-  - [Compiler Requirement](#compiler-requirement)
+  - [Compilation](#compilation)
+    - [Options](#options)
+    - [Requirements](#requirements)
   - [Features \& Usage](#features--usage)
     - [panic \& unimplemented](#panic--unimplemented)
     - [Option \<T\>](#option-t)
@@ -18,13 +19,19 @@
 ### Overview
 Crab_cpp is a C++23 library that simulates Rust's Option<T>, Result<T, E>, panic!, unimplemented!, a match macro and optional Char, str, String to modern C++. Designed for developers who appreciate Rust's explicit error handling and pattern matching but work in C++ ecosystems. This library supports only C++23 and depends on std module.
 
-### How to Compile
+### Compilation
 Currently use [xmake](https://github.com/xmake-io/xmake) to compile this library. Welcome to contribute if you need more build systems.
 
-### Compiler Requirement
+#### Options
+--enable-string: defines macro `CRAB_CPP_ENABLE_STRING`
+--enable-backtrace: defines macro `CRAB_CPP_ENABLE_BACKTRACE`
+
+#### Requirements
 gcc >= 15
+
 msvc >= 1943
-clang >= 18 /clang-cl >= 19.1.1
+
+clang >= 18 / clang-cl >= 19.1.1
 
 ### Features & Usage
 
@@ -153,9 +160,9 @@ int main()
 #### Char & str & String (Optional feature)
 To enable this sub-module, define the `CRAB_CPP_ENABLE_STRING` macro.
 
-These three types represent simplified counterparts of Rust's `char`, `&str`, and `String`. `String` is ends with null-terminated to ensure better interoperability with C/C++ APIs. Using the `from` method to construct `str` or `String` instead of constructors, except you need a empty one.
+These three types represent simplified counterparts of Rust's `char`, `&str`, and `String`. `String` is ends with null-terminated to ensure better interoperability with C/C++ APIs. Using the `from` static member function to construct `str` or `String` instead of constructors, unless you need a empty one.
 
-We've implemented `std::formatter` support and `operator<<` for printing, though output will stop at the first null terminator. Note that String is an alias for `crab_cpp::raw::String<std::allocator<std::byte>>`, use the raw version for custom allocators. UTF-8 handling is powered by utf8proc, supporting up to Unicode 16.
+We've implemented `std::formatter` support and `operator<<` for printing, although output will stop at the first null terminator. Note that String is an alias for `crab_cpp::raw::String<std::allocator<std::byte>>`, use the raw version for custom allocators. UTF-8 handling is powered by utf8proc, supporting up to Unicode 16.
 
 While core functionality is implemented, many methods remain unimplemented. Contributions are welcome!
 
