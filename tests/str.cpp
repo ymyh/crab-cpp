@@ -60,12 +60,21 @@ TEST(StringTest, StrComparison)
     }
 
     {
-        auto a = str::from("Résumé").unwrap();
+        auto a = str::from("RésumÉ").unwrap();
         auto b = str::from("rÉsumé").unwrap();
 
         EXPECT_FALSE(a.eq_ignore_ascii_case(b));
         EXPECT_FALSE(b.eq_ignore_ascii_case(a));
     }
+}
+
+TEST(StringTest, IsASCII)
+{
+    auto resume1 = str::from("resume").unwrap();
+    auto resume2 = str::from("résumé").unwrap();
+
+    EXPECT_TRUE(resume1.is_ascii());
+    EXPECT_FALSE(resume2.is_ascii());
 }
 
 TEST(StringTest, StrOperations)

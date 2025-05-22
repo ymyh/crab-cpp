@@ -684,6 +684,22 @@ public:
     }
 
     /**
+     * @brief Checks if all characters in this string are within the ASCII range.
+     */
+    [[nodiscard]] constexpr auto is_ascii() const noexcept -> bool
+    {
+        for (size_t i = 0; i < this->m_len; i++)
+        {
+            if (static_cast<std::uint8_t>(this->m_data[i]) > 127)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
      * @brief Parses this string into a numeric type
      * @tparam T The numeric type to parse into
      * @return A Result containing either the parsed value or a std::from_chars_result
