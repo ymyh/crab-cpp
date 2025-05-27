@@ -20,8 +20,28 @@ TEST(StringTest, DefaultConstructor)
     EXPECT_TRUE(s.empty());
 }
 
+TEST(StringTest, ComparisonOperators)
+{
+    String s1 = String::from("hello").unwrap();
+    String s2 = String::from("world").unwrap();
+    String s3 = String::from("hello").unwrap();
+    const char* str = "hello";
+
+    EXPECT_TRUE(s1 == s3);
+    EXPECT_TRUE(s1 == str);
+    EXPECT_FALSE(s1 == s2);
+    EXPECT_TRUE(s1 < s2);
+    EXPECT_FALSE(s2 < s1);
+    EXPECT_TRUE(s1 <= s3);
+    EXPECT_TRUE(s1 >= s3);
+    EXPECT_TRUE(s1 > String());
+    EXPECT_TRUE(String() < s1);
+}
+
 TEST(StringTest, FromRawParts)
 {
+    using namespace literal;
+
     // Test empty string
     auto result = String::from_raw_parts(nullptr, 0);
     EXPECT_TRUE(result.is_ok());
@@ -35,7 +55,7 @@ TEST(StringTest, FromRawParts)
     s = result.unwrap();
     EXPECT_EQ(s.size(), 5);
     EXPECT_EQ(s.capacity(), 5);
-    EXPECT_EQ(std::string_view(s.as_raw(), s.size()), "hello");
+    EXPECT_EQ(s, "hello"_s);
 
     // Test invalid UTF-8 string
     const char invalid_utf8[] = {'\xC0', '\x80'}; // Invalid UTF-8 sequence
@@ -45,6 +65,8 @@ TEST(StringTest, FromRawParts)
 
 TEST(StringTest, From)
 {
+    using namespace literal;
+
     // Test empty string
     auto result = String::from("");
     EXPECT_TRUE(result.is_ok());
@@ -58,7 +80,7 @@ TEST(StringTest, From)
     s = result.unwrap();
     EXPECT_EQ(s.size(), 5);
     EXPECT_EQ(s.capacity(), 5);
-    EXPECT_EQ(std::string_view(s.as_raw(), s.size()), "hello");
+    EXPECT_EQ(s, "hello"_s);
 
     // Test invalid UTF-8 string
     const char invalid_utf8[] = {'\xC0', '\x80', '\0'}; // Invalid UTF-8 sequence
@@ -72,22 +94,26 @@ TEST(StringTest, CopyConstructor)
     String s2(s1);
     EXPECT_EQ(s1.size(), s2.size());
     EXPECT_EQ(s1.capacity(), s2.capacity());
-    EXPECT_EQ(std::string_view(s1.as_raw(), s1.size()), std::string_view(s2.as_raw(), s2.size()));
+    EXPECT_EQ(s1, s2);
 }
 
 TEST(StringTest, MoveConstructor)
 {
+    using namespace literal;
+
     String s1 = String::from("hello").unwrap();
     String s2(std::move(s1));
     EXPECT_EQ(s2.size(), 5);
     EXPECT_EQ(s2.capacity(), 5);
-    EXPECT_EQ(std::string_view(s2.as_raw(), s2.size()), "hello");
+    EXPECT_EQ(s2, "hello"_s);
     EXPECT_EQ(s1.size(), 0);
     EXPECT_EQ(s1.capacity(), 0);
 }
 
 TEST(StringTest, Reserve)
 {
+    using namespace literal;
+
     String s;
     s.reserve(10);
     EXPECT_GE(s.capacity(), 10);
@@ -97,7 +123,7 @@ TEST(StringTest, Reserve)
     s.reserve(20);
     EXPECT_GE(s.capacity(), 20);
     EXPECT_EQ(s.size(), 5);
-    EXPECT_EQ(std::string_view(s.as_raw(), s.size()), "hello");
+    EXPECT_EQ(s, "hello"_s);
 }
 
 TEST(StringTest, Clear)
@@ -105,11 +131,13 @@ TEST(StringTest, Clear)
     String s = String::from("hello").unwrap();
     s.clear();
     EXPECT_EQ(s.size(), 0);
-    EXPECT_GE(s.capacity(), 5); // Capacity should remain unchanged
+    EXPECT_GE(s.capacity(), 5);
 }
 
 TEST(StringTest, Push)
 {
+    using namespace literal;
+
     String s;
     s.push(Char('h'));
     s.push(Char('e'));
@@ -117,7 +145,7 @@ TEST(StringTest, Push)
     s.push(Char('l'));
     s.push(Char('o'));
     EXPECT_EQ(s.size(), 5);
-    EXPECT_EQ(std::string_view(s.as_raw(), s.size()), "hello");
+    EXPECT_EQ(s, "hello"_s);
 }
 
 TEST(StringTest, PushStr)
@@ -127,21 +155,23 @@ TEST(StringTest, PushStr)
     String s;
     s.push_str("hello"_s);
     EXPECT_EQ(s.size(), 5);
-    EXPECT_EQ(std::string_view(s.as_raw(), s.size()), "hello");
+    EXPECT_EQ(s, "hello"_s);
 
     s.push_str(" world"_s);
     EXPECT_EQ(s.size(), 11);
-    EXPECT_EQ(std::string_view(s.as_raw(), s.size()), "hello world");
+    EXPECT_EQ(s, "hello world"_s);
 }
 
 TEST(StringTest, SplitOff)
 {
+    using namespace literal;
+
     String s = String::from("hello world").unwrap();
     String s2 = s.split_off(6);
     EXPECT_EQ(s.size(), 6);
     EXPECT_EQ(s2.size(), 5);
-    EXPECT_EQ(std::string_view(s.as_raw(), s.size()), "hello ");
-    EXPECT_EQ(std::string_view(s2.as_raw(), s2.size()), "world");
+    EXPECT_EQ(s, "hello "_s);
+    EXPECT_EQ(s2, "world"_s);
 
     // Test invalid split position
     EXPECT_DEATH(s.split_off(10), ".*");
@@ -165,18 +195,20 @@ TEST(StringTest, Truncate)
 
 TEST(StringTest, Pop)
 {
+    using namespace literal;
+
     String s = String::from("hello").unwrap();
     auto ch = s.pop();
     EXPECT_TRUE(ch.is_some());
     EXPECT_EQ(ch.unwrap(), Char('o'));
     EXPECT_EQ(s.size(), 4);
-    EXPECT_EQ(std::string_view(s.as_raw(), s.size()), "hell");
+    EXPECT_EQ(s, "hell"_s);
 
     ch = s.pop();
     EXPECT_TRUE(ch.is_some());
     EXPECT_EQ(ch.unwrap(), Char('l'));
     EXPECT_EQ(s.size(), 3);
-    EXPECT_EQ(std::string_view(s.as_raw(), s.size()), "hel");
+    EXPECT_EQ(s, "hel"_s);
 
     s.clear();
     ch = s.pop();
@@ -185,26 +217,30 @@ TEST(StringTest, Pop)
 
 TEST(StringTest, MakeAsciiLowercase)
 {
+    using namespace literal;
+
     String s = String::from("HELLO").unwrap();
     s.make_ascii_lowercase();
-    EXPECT_EQ(std::string_view(s.as_raw(), s.size()), "hello");
+    EXPECT_EQ(s, "hello"_s);
 
     // Test non-ASCII characters
     s = String::from("HÉLLO").unwrap();
     s.make_ascii_lowercase();
-    EXPECT_EQ(std::string_view(s.as_raw(), s.size()), "hÉllo");
+    EXPECT_EQ(s, "hÉllo"_s);
 }
 
 TEST(StringTest, MakeAsciiUppercase)
 {
+    using namespace literal;
+
     String s = String::from("hello").unwrap();
     s.make_ascii_uppercase();
-    EXPECT_EQ(std::string_view(s.as_raw(), s.size()), "HELLO");
+    EXPECT_EQ(s, "HELLO"_s);
 
     // Test non-ASCII characters
     s = String::from("héllo").unwrap();
     s.make_ascii_uppercase();
-    EXPECT_EQ(std::string_view(s.as_raw(), s.size()), "HéLLO");
+    EXPECT_EQ(s, "HéLLO"_s);
 }
 
 TEST(StringTest, AssignmentOperator)
@@ -214,7 +250,7 @@ TEST(StringTest, AssignmentOperator)
     s2 = s1;
     EXPECT_EQ(s1.size(), s2.size());
     EXPECT_EQ(s1.capacity(), s2.capacity());
-    EXPECT_EQ(std::string_view(s1.as_raw(), s1.size()), std::string_view(s2.as_raw(), s2.size()));
+    EXPECT_EQ(s1, s2);
 }
 
 TEST(StringTest, PlusEqualsOperator)
@@ -224,16 +260,16 @@ TEST(StringTest, PlusEqualsOperator)
     String s = String::from("hello").unwrap();
     s += " world"_s;
     EXPECT_EQ(s.size(), 11);
-    EXPECT_EQ(std::string_view(s.as_raw(), s.size()), "hello world");
+    EXPECT_EQ(s, "hello world"_s);
 
     s += Char('!');
     EXPECT_EQ(s.size(), 12);
-    EXPECT_EQ(std::string_view(s.as_raw(), s.size()), "hello world!");
+    EXPECT_EQ(s, "hello world!"_s);
 
     String s2 = String::from(" hello").unwrap();
     s += s2;
     EXPECT_EQ(s.size(), 18);
-    EXPECT_EQ(std::string_view(s.as_raw(), s.size()), "hello world! hello");
+    EXPECT_EQ(s, "hello world! hello"_s);
 }
 
 TEST(StringTest, PlusOperator)
@@ -244,31 +280,15 @@ TEST(StringTest, PlusOperator)
     String s2 = String::from(" world").unwrap();
     String s3 = s1 + s2;
     EXPECT_EQ(s3.size(), 11);
-    EXPECT_EQ(std::string_view(s3.as_raw(), s3.size()), "hello world");
+    EXPECT_EQ(s3, "hello world"_s);
 
     String s4 = s1 + " world"_s;
     EXPECT_EQ(s4.size(), 11);
-    EXPECT_EQ(std::string_view(s4.as_raw(), s4.size()), "hello world");
+    EXPECT_EQ(s4, "hello world"_s);
 
     String s5 = s1 + Char('!');
     EXPECT_EQ(s5.size(), 6);
-    EXPECT_EQ(std::string_view(s5.as_raw(), s5.size()), "hello!");
-}
-
-TEST(StringTest, ComparisonOperators)
-{
-    String s1 = String::from("hello").unwrap();
-    String s2 = String::from("world").unwrap();
-    String s3 = String::from("hello").unwrap();
-
-    EXPECT_TRUE(s1 == s3);
-    EXPECT_FALSE(s1 == s2);
-    EXPECT_TRUE(s1 < s2);
-    EXPECT_FALSE(s2 < s1);
-    EXPECT_TRUE(s1 <= s3);
-    EXPECT_TRUE(s1 >= s3);
-    EXPECT_TRUE(s1 > String());
-    EXPECT_TRUE(String() < s1);
+    EXPECT_EQ(s5, "hello!"_s);
 }
 
 #endif

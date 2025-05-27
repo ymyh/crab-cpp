@@ -15,6 +15,8 @@ add_rules("mode.debug", "mode.release")
 add_requires("gtest", {configs = {main = true}})
 add_requires("utf8proc")
 
+local tc = get_config("toolchain")
+
 target("crab_cpp")
     set_default(true)
     set_kind("static")
@@ -32,7 +34,7 @@ target("crab_cpp")
     add_files("src/match.cppm", "src/mod.cppm", "src/option.cppm", "src/panic.cppm", "src/result.cppm")
     add_includedirs("include", ".")
 
-    if is_os("windows") then
+    if is_os("windows") and (tc == nil or tc == "clang-cl" or tc == "msvc") then
         add_cxxflags("/utf-8")
     end
 
@@ -53,7 +55,7 @@ target("crab_cpp_dev")
     add_files("main.cpp")
     add_includedirs("include", ".")
 
-    if is_os("windows") then
+    if is_os("windows") and (tc == nil or tc == "clang-cl" or tc == "msvc") then
         add_cxxflags("/utf-8")
     end
 
@@ -77,9 +79,7 @@ target("crab_cpp_test")
 
     add_links("gtest_main")
 
-    local tc = get_config("toolchain")
-
-    if is_os("windows") and (tc == "clang-cl" or tc == "msvc") then
+    if is_os("windows") and (tc == nil or tc == "clang-cl" or tc == "msvc") then
         add_ldflags("/subsystem:console")
         add_cxxflags("/utf-8")
     end

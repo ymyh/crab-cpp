@@ -2186,11 +2186,11 @@ public:
      */
     auto reserve(std::size_t additional) -> void
     {
-        const std::size_t new_capacity = this->m_len + additional;
-        if (new_capacity <= this->m_alloc_and_capacity.second)
-        {
-            return;
-        }
+        const std::size_t new_capacity = this->m_alloc_and_capacity.second + additional;
+        // if (new_capacity <= this->m_alloc_and_capacity.second)
+        // {
+        //     return;
+        // }
 
         // Allocate new memory (add 1 for null terminator)
         pointer new_data = std::allocator_traits<Alloc>::allocate(
@@ -2418,7 +2418,7 @@ public:
             this->reserve(new_len - this->m_alloc_and_capacity.second);
         }
 
-        std::copy(str.data(), str.data() + str.size(), this->m_data + this->m_len); 
+        std::copy(str.data(), str.data() + str.size(), this->m_data + this->m_len);
         this->m_len = new_len;
         // Add null terminator
         this->m_data[this->m_len] = std::byte{0};
@@ -2519,6 +2519,22 @@ template<typename Alloc>
 }
 
 template<typename Alloc>
+[[nodiscard]] constexpr auto operator==(const raw::String<Alloc>& lhs, const std::string& rhs) noexcept -> bool
+{
+    if (lhs.size() != rhs.size())
+    {
+        return false;
+    }
+    return std::equal(lhs.data(), lhs.data() + lhs.size(), rhs.data());
+}
+
+template<typename Alloc>
+[[nodiscard]] constexpr auto operator==(const std::string& lhs, const raw::String<Alloc>& rhs) noexcept -> bool
+{
+    return rhs == lhs;
+}
+
+template<typename Alloc>
 [[nodiscard]] auto operator==(const raw::String<Alloc>& lhs, const char* rhs) noexcept -> bool
 {
     if (lhs.size() != std::strlen(rhs))
@@ -2544,6 +2560,20 @@ template<typename Alloc>
 }
 
 [[nodiscard]] auto operator==(const char* lhs, const str& rhs) noexcept -> bool
+{
+    return rhs == lhs;
+}
+
+[[nodiscard]] constexpr auto operator==(const str& lhs, const std::string& rhs) noexcept -> bool
+{
+    if (lhs.size() != rhs.size())
+    {
+        return false;
+    }
+    return std::equal((lhs.data()), lhs.data() + lhs.size(), reinterpret_cast<const std::byte*>(rhs.data()));
+}
+
+[[nodiscard]] constexpr auto operator==(const std::string& lhs, const str& rhs) noexcept -> bool
 {
     return rhs == lhs;
 }

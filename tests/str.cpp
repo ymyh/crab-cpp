@@ -40,9 +40,11 @@ TEST(StringTest, StrComparison)
     auto hello2 = str::from("Hello").unwrap();
     auto world = str::from("World").unwrap();
     auto hello_world = str::from("Hello World").unwrap();
+    const char* str = "Hello";
 
     // Test equality
     EXPECT_EQ(hello1, hello2);
+    EXPECT_EQ(hello1, str);
     EXPECT_NE(hello1, world);
 
     // Test ordering
