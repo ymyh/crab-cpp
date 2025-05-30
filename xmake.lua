@@ -19,7 +19,7 @@ local tc = get_config("toolchain")
 
 target("crab_cpp")
     set_default(true)
-    set_kind("static")
+    set_kind("moduleonly")
     set_languages("c++23", "c11")
     set_policy("build.c++.modules", true)
 
@@ -27,11 +27,11 @@ target("crab_cpp")
 
     if has_config("enable-string") then
         add_packages("utf8proc")
-        add_files("src/string.cppm")
+        add_files("src/string.cppm", {public = true})
     end
 
     add_packages("utf8proc")
-    add_files("src/match.cppm", "src/mod.cppm", "src/option.cppm", "src/panic.cppm", "src/result.cppm")
+    add_files("src/match.cppm", "src/mod.cppm", "src/option.cppm", "src/panic.cppm", "src/result.cppm", {public = true})
     add_includedirs("include", ".")
 
     if is_os("windows") and (tc == nil or tc == "clang-cl" or tc == "msvc") then

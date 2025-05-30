@@ -34,12 +34,28 @@ TEST(StringTest, StrConstruction)
     EXPECT_EQ(result.unwrap_err().pos, 0);
 }
 
+TEST(StringTest, StrLiterals)
+{
+    using namespace literal;
+
+    auto hello = "Hello"_s;
+    auto world = "World"_s;
+    auto hello_world = "Hello World"_s;
+
+    EXPECT_EQ(hello.size(), 5);
+    EXPECT_EQ(world.size(), 5);
+    EXPECT_EQ(hello_world.size(), 11);
+    EXPECT_EQ(hello_world, str::from("Hello World").unwrap());
+}
+
 TEST(StringTest, StrComparison)
 {
-    auto hello1 = str::from("Hello").unwrap();
-    auto hello2 = str::from("Hello").unwrap();
-    auto world = str::from("World").unwrap();
-    auto hello_world = str::from("Hello World").unwrap();
+    using namespace literal;
+
+    auto hello1 = "Hello"_s;
+    auto hello2 = "Hello"_s;
+    auto world = "World"_s;
+    auto hello_world = "Hello World"_s;
     const char* str = "Hello";
 
     // Test equality
@@ -54,16 +70,16 @@ TEST(StringTest, StrComparison)
 
     // Test eq_ignore_ascii_case
     {
-        auto upper = str::from("ABCDEFGHIJKLMNOPQRSTUVWXYZ").unwrap();
-        auto lower = str::from("abcdefghijklmnopqrstuvwxyz").unwrap();
+        auto upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"_s;
+        auto lower = "abcdefghijklmnopqrstuvwxyz"_s;
 
         EXPECT_TRUE(upper.eq_ignore_ascii_case(lower));
         EXPECT_TRUE(lower.eq_ignore_ascii_case(upper));
     }
 
     {
-        auto a = str::from("RésumÉ").unwrap();
-        auto b = str::from("rÉsumé").unwrap();
+        auto a = "RésumÉ"_s;
+        auto b = "rÉsumé"_s;
 
         EXPECT_FALSE(a.eq_ignore_ascii_case(b));
         EXPECT_FALSE(b.eq_ignore_ascii_case(a));
@@ -72,8 +88,10 @@ TEST(StringTest, StrComparison)
 
 TEST(StringTest, IsASCII)
 {
-    auto resume1 = str::from("resume").unwrap();
-    auto resume2 = str::from("résumé").unwrap();
+    using namespace literal;
+
+    auto resume1 = "resume"_s;
+    auto resume2 = "résumé"_s;
 
     EXPECT_TRUE(resume1.is_ascii());
     EXPECT_FALSE(resume2.is_ascii());
@@ -81,9 +99,11 @@ TEST(StringTest, IsASCII)
 
 TEST(StringTest, StrOperations)
 {
-    auto hello = str::from("Hello").unwrap();
-    auto world = str::from("World").unwrap();
-    auto hello_world = str::from("Hello World").unwrap();
+    using namespace literal;
+
+    auto hello = "Hello"_s;
+    auto world = "World"_s;
+    auto hello_world = "Hello World"_s;
 
     // Test contains
     EXPECT_TRUE(hello_world.contains(hello));
@@ -101,19 +121,21 @@ TEST(StringTest, StrOperations)
     // Test find
     EXPECT_EQ(hello_world.find(hello).unwrap(), 0);
     EXPECT_EQ(hello_world.find(world).unwrap(), 6);
-    EXPECT_TRUE(hello_world.find(str::from("NotExist").unwrap()).is_none());
+    EXPECT_TRUE(hello_world.find("NotExist"_s).is_none());
 
     // Test rfind
     EXPECT_EQ(hello_world.rfind(hello).unwrap(), 0);
     EXPECT_EQ(hello_world.rfind(world).unwrap(), 6);
-    EXPECT_TRUE(hello_world.rfind(str::from("NotExist").unwrap()).is_none());
+    EXPECT_TRUE(hello_world.rfind("NotExist"_s).is_none());
 }
 
 TEST(StringTest, StrSlicing)
 {
-    auto hello_world = str::from("Hello World").unwrap();
-    auto hello = str::from("Hello").unwrap();
-    auto world = str::from("World").unwrap();
+    using namespace literal;
+
+    auto hello_world = "Hello World"_s;
+    auto hello = "Hello"_s;
+    auto world = "World"_s;
 
     // Test slice
     EXPECT_EQ(hello_world.slice(0, 5), hello);
@@ -126,42 +148,48 @@ TEST(StringTest, StrSlicing)
 
 TEST(StringTest, StrTrim)
 {
-    auto str_with_ws = str::from("  Hello World  ").unwrap();
-    auto hello_world = str::from("Hello World").unwrap();
+    using namespace literal;
+
+    auto str_with_ws = "  Hello World  "_s;
+    auto hello_world = "Hello World"_s;
 
     // Test trim_ascii
     EXPECT_EQ(str_with_ws.trim_ascii(), hello_world);
 
     // Test trim_ascii_start
-    EXPECT_EQ(str_with_ws.trim_ascii_start(), str::from("Hello World  ").unwrap());
+    EXPECT_EQ(str_with_ws.trim_ascii_start(), "Hello World  "_s);
 
     // Test trim_ascii_end
-    EXPECT_EQ(str_with_ws.trim_ascii_end(), str::from("  Hello World").unwrap());
+    EXPECT_EQ(str_with_ws.trim_ascii_end(), "  Hello World"_s);
 }
 
 TEST(StringTest, StrStrip)
 {
-    auto hello_world = str::from("Hello World").unwrap();
-    auto hello = str::from("Hello").unwrap();
-    auto world = str::from("World").unwrap();
+    using namespace literal;
+
+    auto hello_world = "Hello World"_s;
+    auto hello = "Hello"_s;
+    auto world = "World"_s;
 
     // Test strip_prefix
-    EXPECT_EQ(hello_world.strip_prefix(hello).unwrap(), str::from(" World").unwrap());
+    EXPECT_EQ(hello_world.strip_prefix(hello).unwrap(), " World"_s);
     EXPECT_TRUE(hello_world.strip_prefix(world).is_none());
 
     // Test strip_suffix
-    EXPECT_EQ(hello_world.strip_suffix(world).unwrap(), str::from("Hello ").unwrap());
+    EXPECT_EQ(hello_world.strip_suffix(world).unwrap(), "Hello "_s);
     EXPECT_TRUE(hello_world.strip_suffix(hello).is_none());
 }
 
 TEST(StringTest, StrSplit)
 {
-    auto hello = str::from("Hello").unwrap();
-    auto world = str::from("World").unwrap();
-    auto space = str::from(" ").unwrap();
+    using namespace literal;
+
+    auto hello = "Hello"_s;
+    auto world = "World"_s;
+    auto space = " "_s;
 
     {
-        auto hello_world = str::from("Hello World").unwrap();
+        auto hello_world = "Hello World"_s;
 
         // Test split
         auto split = hello_world.split(space);
@@ -174,7 +202,7 @@ TEST(StringTest, StrSplit)
     }
 
     {
-        auto hello_world = str::from(" Hello World ").unwrap();
+        auto hello_world = " Hello World "_s;
 
         // Test split
         auto split = hello_world.split(space);
@@ -192,7 +220,7 @@ TEST(StringTest, StrSplit)
 
     {
         // Test split_ascii_whitespace
-        auto str_with_ws = str::from("  Hello   World  ").unwrap();
+        auto str_with_ws = "  Hello   World  "_s;
         auto split_ws = str_with_ws.split_ascii_whitespace();
         auto it2 = split_ws.begin();
         EXPECT_EQ(str::from_bytes_unchecked(it2->data, it2->len), hello);
@@ -205,14 +233,17 @@ TEST(StringTest, StrSplit)
 
 TEST(StringTest, StrLines)
 {
+    using namespace literal;
+
+    auto hello = "Hello"_s;
+    auto world = "World"_s;
+
     // Test \n line endings
     {
-        auto multi_line = str::from("Hello\nWorld\n").unwrap();
-        auto hello = str::from("Hello").unwrap();
-        auto world = str::from("World").unwrap();
-
+        auto multi_line = "Hello\nWorld\n"_s;
         auto lines = multi_line.lines();
         auto it = lines.begin();
+
         EXPECT_EQ(str::from_bytes_unchecked(it->data, it->len), hello);
         ++it;
         EXPECT_EQ(str::from_bytes_unchecked(it->data, it->len), world);
@@ -222,12 +253,10 @@ TEST(StringTest, StrLines)
 
     // Test \r\n line endings
     {
-        auto multi_line = str::from("Hello\r\nWorld\r\n").unwrap();
-        auto hello = str::from("Hello").unwrap();
-        auto world = str::from("World").unwrap();
-
+        auto multi_line = "Hello\r\nWorld\r\n"_s;
         auto lines = multi_line.lines();
         auto it = lines.begin();
+
         EXPECT_EQ(str::from_bytes_unchecked(it->data, it->len), hello);
         ++it;
         EXPECT_EQ(str::from_bytes_unchecked(it->data, it->len), world);
@@ -237,12 +266,10 @@ TEST(StringTest, StrLines)
 
     // Test mixed line endings
     {
-        auto multi_line = str::from("Hello\nWorld\r\n").unwrap();
-        auto hello = str::from("Hello").unwrap();
-        auto world = str::from("World").unwrap();
-
+        auto multi_line = "Hello\nWorld\r\n"_s;
         auto lines = multi_line.lines();
         auto it = lines.begin();
+
         EXPECT_EQ(str::from_bytes_unchecked(it->data, it->len), hello);
         ++it;
         EXPECT_EQ(str::from_bytes_unchecked(it->data, it->len), world);
@@ -252,11 +279,11 @@ TEST(StringTest, StrLines)
 
     // Test empty lines
     {
-        auto multi_line = str::from("\n\r\n\n").unwrap();
-        auto empty = str::from("").unwrap();
-
+        auto multi_line = "\n\r\n\n"_s;
+        auto empty = ""_s;
         auto lines = multi_line.lines();
         auto it = lines.begin();
+
         EXPECT_EQ(str::from_bytes_unchecked(it->data, it->len), empty);
         ++it;
         EXPECT_EQ(str::from_bytes_unchecked(it->data, it->len), empty);
@@ -269,7 +296,9 @@ TEST(StringTest, StrLines)
 
 TEST(StringTest, StrChars)
 {
-    auto s = str::from("y̆").unwrap();
+    using namespace literal;
+
+    auto s = "y̆"_s;
     auto chars = s.chars();
     auto it = chars.begin();
 
@@ -280,72 +309,60 @@ TEST(StringTest, StrChars)
     EXPECT_EQ(it, chars.end());
 }
 
-TEST(StringTest, StrLiterals)
+TEST(StringTest, StrParse)
 {
     using namespace literal;
 
-    auto hello = "Hello"_s;
-    auto world = "World"_s;
-    auto hello_world = "Hello World"_s;
-
-    EXPECT_EQ(hello.size(), 5);
-    EXPECT_EQ(world.size(), 5);
-    EXPECT_EQ(hello_world.size(), 11);
-    EXPECT_EQ(hello_world, str::from("Hello World").unwrap());
-}
-
-TEST(StringTest, StrParse)
-{
     // Test integer parsing
-    auto int_str = str::from("123").unwrap();
+    auto int_str = "123"_s;
     auto int_result = int_str.parse<int32_t>();
     EXPECT_TRUE(int_result.is_ok());
     EXPECT_EQ(int_result.unwrap(), 123);
 
     // Test negative integer parsing
-    auto neg_int_str = str::from("-456").unwrap();
+    auto neg_int_str = "-456"_s;
     auto neg_int_result = neg_int_str.parse<int32_t>();
     EXPECT_TRUE(neg_int_result.is_ok());
     EXPECT_EQ(neg_int_result.unwrap(), -456);
 
     // Test floating point parsing
-    auto float_str = str::from("3.14").unwrap();
+    auto float_str = "3.14"_s;
     auto float_result = float_str.parse<double>();
     EXPECT_TRUE(float_result.is_ok());
     EXPECT_DOUBLE_EQ(float_result.unwrap(), 3.14);
 
     // Test negative floating point parsing
-    auto neg_float_str = str::from("-2.718").unwrap();
+    auto neg_float_str = "-2.718"_s;
     auto neg_float_result = neg_float_str.parse<double>();
     EXPECT_TRUE(neg_float_result.is_ok());
     EXPECT_DOUBLE_EQ(neg_float_result.unwrap(), -2.718);
 
     // Test invalid integer parsing
-    auto invalid_int_str = str::from("abc").unwrap();
+    auto invalid_int_str = "abc"_s;
     auto invalid_int_result = invalid_int_str.parse<int32_t>();
     EXPECT_TRUE(invalid_int_result.is_err());
     EXPECT_EQ(invalid_int_result.unwrap_err().ec, std::errc::invalid_argument);
 
     // Test invalid floating point parsing
-    auto invalid_float_str = str::from("xyz").unwrap();
+    auto invalid_float_str = "xyz"_s;
     auto invalid_float_result = invalid_float_str.parse<double>();
     EXPECT_TRUE(invalid_float_result.is_err());
     EXPECT_EQ(invalid_float_result.unwrap_err().ec, std::errc::invalid_argument);
 
     // Test empty string parsing
-    auto empty_str = str::from("").unwrap();
+    auto empty_str = ""_s;
     auto empty_result = empty_str.parse<int32_t>();
     EXPECT_TRUE(empty_result.is_err());
     EXPECT_EQ(empty_result.unwrap_err().ec, std::errc::invalid_argument);
 
     // Test overflow integer parsing
-    auto overflow_str = str::from("999999999999999999999999999999").unwrap();
+    auto overflow_str = "999999999999999999999999999999"_s;
     auto overflow_result = overflow_str.parse<int32_t>();
     EXPECT_TRUE(overflow_result.is_err());
     EXPECT_EQ(overflow_result.unwrap_err().ec, std::errc::result_out_of_range);
 
     // Test partial number parsing
-    auto partial_str = str::from("123abc").unwrap();
+    auto partial_str = "123abc"_s;
     auto partial_result = partial_str.parse<int32_t>();
     EXPECT_TRUE(partial_result.is_err());
     EXPECT_EQ(partial_result.unwrap_err().ec, std::errc::invalid_argument);
@@ -353,40 +370,44 @@ TEST(StringTest, StrParse)
 
 TEST(StringTest, StrAsciiCase)
 {
+    using namespace literal;
+
     // Test to_ascii_lowercase
-    auto upper_str = str::from("HELLO WORLD").unwrap();
-    auto lower_str = str::from("hello world").unwrap();
+    auto upper_str = "HELLO WORLD"_s;
+    auto lower_str = "hello world"_s;
     EXPECT_EQ(upper_str.to_ascii_lowercase(), lower_str);
 
     // Test to_ascii_uppercase
     EXPECT_EQ(lower_str.to_ascii_uppercase(), upper_str);
 
     // Test mixed case
-    auto mixed_str = str::from("HeLlO WoRlD").unwrap();
+    auto mixed_str = "HeLlO WoRlD"_s;
     EXPECT_EQ(mixed_str.to_ascii_lowercase(), lower_str);
     EXPECT_EQ(mixed_str.to_ascii_uppercase(), upper_str);
 
     // Test non-ASCII characters remain unchanged
-    auto non_ascii_str = str::from("Héllö Wörld").unwrap();
-    EXPECT_EQ(non_ascii_str.to_ascii_lowercase(), str::from("héllö wörld").unwrap());
-    EXPECT_EQ(non_ascii_str.to_ascii_uppercase(), str::from("HéLLö WöRLD").unwrap());
+    auto non_ascii_str = "Héllö Wörld"_s;
+    EXPECT_EQ(non_ascii_str.to_ascii_lowercase(), "héllö wörld"_s);
+    EXPECT_EQ(non_ascii_str.to_ascii_uppercase(), "HéLLö WöRLD"_s);
 
     // Test empty string
-    auto empty_str = str::from("").unwrap();
+    auto empty_str = ""_s;
     EXPECT_EQ(empty_str.to_ascii_lowercase(), empty_str);
     EXPECT_EQ(empty_str.to_ascii_uppercase(), empty_str);
 }
 
 TEST(StringTest, StrToStdString)
 {
+    using namespace literal;
+
     // Test basic ASCII string
-    auto hello_str = str::from("Hello World").unwrap();
+    auto hello_str = "Hello World"_s;
     auto hello_std = hello_str.to_std_string();
     EXPECT_EQ(hello_std, "Hello World");
     EXPECT_EQ(hello_std.size(), hello_str.size());
 
     // Test empty string
-    auto empty_str = str::from("").unwrap();
+    auto empty_str = ""_s;
     auto empty_std = empty_str.to_std_string();
     EXPECT_TRUE(empty_std.empty());
     EXPECT_EQ(empty_std.size(), 0);
@@ -394,63 +415,67 @@ TEST(StringTest, StrToStdString)
 
 TEST(StringTest, StrReplace)
 {
+    using namespace literal;
+
     // Test basic replace
-    auto hello_world = str::from("Hello World").unwrap();
-    auto world = str::from("World").unwrap();
-    auto universe = str::from("Universe").unwrap();
-    EXPECT_EQ(hello_world.replace(world, universe), str::from("Hello Universe").unwrap());
+    auto hello_world = "Hello World"_s;
+    auto world = "World"_s;
+    auto universe = "Universe"_s;
+    EXPECT_EQ(hello_world.replace(world, universe), "Hello Universe"_s);
 
     // Test replace with empty pattern
-    auto empty_pattern = str::from("").unwrap();
-    auto replacement = str::from("X").unwrap();
-    EXPECT_EQ(hello_world.replace(empty_pattern, replacement), str::from("Hello World").unwrap());
+    auto empty_pattern = ""_s;
+    auto replacement = "X"_s;
+    EXPECT_EQ(hello_world.replace(empty_pattern, replacement), "Hello World"_s);
 
     // Test replace with empty replacement
-    auto empty_replacement = str::from("").unwrap();
-    auto space = str::from(" ").unwrap();
-    EXPECT_EQ(hello_world.replace(space, empty_replacement), str::from("HelloWorld").unwrap());
+    auto empty_replacement = ""_s;
+    auto space = " "_s;
+    EXPECT_EQ(hello_world.replace(space, empty_replacement), "HelloWorld"_s);
 
     // Test replace with non-ASCII characters
-    auto non_ascii_str = str::from("Héllö Wörld").unwrap();
-    auto non_ascii_pattern = str::from("Wörld").unwrap();
-    auto non_ascii_replacement = str::from("Universe").unwrap();
-    EXPECT_EQ(non_ascii_str.replace(non_ascii_pattern, non_ascii_replacement), str::from("Héllö Universe").unwrap());
+    auto non_ascii_str = "Héllö Wörld"_s;
+    auto non_ascii_pattern = "Wörld"_s;
+    auto non_ascii_replacement = "Universe"_s;
+    EXPECT_EQ(non_ascii_str.replace(non_ascii_pattern, non_ascii_replacement), "Héllö Universe"_s);
 
     // Test replace with UTF-8 characters
-    auto utf8_str = str::from("你好世界").unwrap();
-    auto utf8_pattern = str::from("世界").unwrap();
-    auto utf8_replacement = str::from("宇宙").unwrap();
-    EXPECT_EQ(utf8_str.replace(utf8_pattern, utf8_replacement), str::from("你好宇宙").unwrap());
+    auto utf8_str = "你好世界"_s;
+    auto utf8_pattern = "世界"_s;
+    auto utf8_replacement = "宇宙"_s;
+    EXPECT_EQ(utf8_str.replace(utf8_pattern, utf8_replacement), "你好宇宙"_s);
 
     // Test replace_n with limit
-    auto repeated = str::from("aaa").unwrap();
-    auto a = str::from("a").unwrap();
-    auto b = str::from("b").unwrap();
-    EXPECT_EQ(repeated.replace_n(a, b, 2), str::from("bba").unwrap());
-    EXPECT_EQ(repeated.replace_n(a, b, 1), str::from("baa").unwrap());
+    auto repeated = "aaa"_s;
+    auto a = "a"_s;
+    auto b = "b"_s;
+    EXPECT_EQ(repeated.replace_n(a, b, 2), "bba"_s);
+    EXPECT_EQ(repeated.replace_n(a, b, 1), "baa"_s);
     EXPECT_EQ(repeated.replace_n(a, b, 0), repeated);
-    EXPECT_EQ(repeated.replace_n(a, b, 3), str::from("bbb").unwrap());
-    EXPECT_EQ(repeated.replace_n(a, b, 4), str::from("bbb").unwrap()); // More than occurrences
+    EXPECT_EQ(repeated.replace_n(a, b, 3), "bbb"_s);
+    EXPECT_EQ(repeated.replace_n(a, b, 4), "bbb"_s); // More than occurrences
 
     // Test replace_n with empty pattern
-    EXPECT_EQ(hello_world.replace_n(empty_pattern, replacement, 2), str::from("Hello World").unwrap());
+    EXPECT_EQ(hello_world.replace_n(empty_pattern, replacement, 2), "Hello World"_s);
 
     // Test replace_n with empty replacement
-    EXPECT_EQ(hello_world.replace_n(space, empty_replacement, 1), str::from("HelloWorld").unwrap());
+    EXPECT_EQ(hello_world.replace_n(space, empty_replacement, 1), "HelloWorld"_s);
 }
 
 TEST(StringTest, StrRepeat)
 {
+    using namespace literal;
+
     // Test basic repeat
-    auto hello = str::from("Hello").unwrap();
-    auto hello_hello = str::from("HelloHello").unwrap();
+    auto hello = "Hello"_s;
+    auto hello_hello = "HelloHello"_s;
     EXPECT_EQ(hello.repeat(2), hello_hello);
 
     // Test repeat with empty string
-    auto empty = str::from("").unwrap();
+    auto empty = ""_s;
     EXPECT_EQ(empty.repeat(5), empty);
 
-    auto alphabet = str::from("abcdefghijklmnopqrstuvwxyz").unwrap();
+    auto alphabet = "abcdefghijklmnopqrstuvwxyz"_s;
     EXPECT_DEATH(alphabet.repeat(0xFFFFFFFFFFFFFFFF), "Repeat times overflow");
 }
 
@@ -458,15 +483,17 @@ TEST(StringTest, JoinWith)
 {
     using namespace literal;
 
-    auto s = str::from("hello,world").unwrap();
+    auto s = "hello,world"_s;
     EXPECT_EQ(s.split(",") | strings::join_with(".") | std::ranges::to<String>(), "hello.world"_s);
 }
 
 TEST(StringTest, StrMatches)
 {
+    using namespace literal;
+
     // Test basic pattern matching
-    auto text = str::from("Hello World Hello").unwrap();
-    auto pattern = str::from("Hello").unwrap();
+    auto text = "Hello World Hello"_s;
+    auto pattern = "Hello"_s;
     auto matches = text.matches(pattern);
     auto it = matches.begin();
 
@@ -477,17 +504,17 @@ TEST(StringTest, StrMatches)
     EXPECT_EQ(it, matches.end());
 
     // Test no matches
-    auto no_matches = text.matches(str::from("xyz").unwrap());
+    auto no_matches = text.matches("xyz"_s);
     EXPECT_EQ(no_matches.begin(), no_matches.end());
 
     // Test empty pattern
-    auto empty_pattern = str::from("").unwrap();
+    auto empty_pattern = ""_s;
     auto empty_matches = text.matches(empty_pattern);
     EXPECT_EQ(empty_matches.begin(), empty_matches.end());
 
     // Test pattern at start and end
-    auto start_end = str::from("abcabc").unwrap();
-    auto abc = str::from("abc").unwrap();
+    auto start_end = "abcabc"_s;
+    auto abc = "abc"_s;
     auto abc_matches = start_end.matches(abc);
     it = abc_matches.begin();
 
@@ -498,8 +525,8 @@ TEST(StringTest, StrMatches)
     EXPECT_EQ(it, abc_matches.end());
 
     // Test UTF-8 pattern matching
-    auto utf8_text = str::from("你好世界你好").unwrap();
-    auto utf8_pattern = str::from("你好").unwrap();
+    auto utf8_text = "你好世界你好"_s;
+    auto utf8_pattern = "你好"_s;
     auto utf8_matches = utf8_text.matches(utf8_pattern);
     it = utf8_matches.begin();
 

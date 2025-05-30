@@ -20,24 +20,6 @@ TEST(StringTest, DefaultConstructor)
     EXPECT_TRUE(s.empty());
 }
 
-TEST(StringTest, ComparisonOperators)
-{
-    String s1 = String::from("hello").unwrap();
-    String s2 = String::from("world").unwrap();
-    String s3 = String::from("hello").unwrap();
-    const char* str = "hello";
-
-    EXPECT_TRUE(s1 == s3);
-    EXPECT_TRUE(s1 == str);
-    EXPECT_FALSE(s1 == s2);
-    EXPECT_TRUE(s1 < s2);
-    EXPECT_FALSE(s2 < s1);
-    EXPECT_TRUE(s1 <= s3);
-    EXPECT_TRUE(s1 >= s3);
-    EXPECT_TRUE(s1 > String());
-    EXPECT_TRUE(String() < s1);
-}
-
 TEST(StringTest, FromRawParts)
 {
     using namespace literal;
@@ -110,6 +92,35 @@ TEST(StringTest, MoveConstructor)
     EXPECT_EQ(s1.capacity(), 0);
 }
 
+TEST(StringTest, Literal)
+{
+    using namespace literal;
+
+    auto s = "hello"_S;
+    EXPECT_EQ(s, "hello"_s);
+}
+
+TEST(StringTest, ComparisonOperators)
+{
+    using namespace literal;
+
+    String s1 = "hello"_S;
+    String s2 = "world"_S;
+    String s3 = "hello"_S;
+    const char* str = "hello";
+
+    EXPECT_TRUE(s1 == s3);
+    EXPECT_TRUE(s1 == str);
+    EXPECT_FALSE(s1 == s2);
+    EXPECT_TRUE(s1 < s2);
+    EXPECT_FALSE(s1 > s2);
+    EXPECT_FALSE(s2 < s1);
+    EXPECT_TRUE(s1 <= s3);
+    EXPECT_TRUE(s1 >= s3);
+    EXPECT_TRUE(s1 > String());
+    EXPECT_TRUE(String() < s1);
+}
+
 TEST(StringTest, Reserve)
 {
     using namespace literal;
@@ -119,7 +130,7 @@ TEST(StringTest, Reserve)
     EXPECT_GE(s.capacity(), 10);
     EXPECT_EQ(s.size(), 0);
 
-    s = String::from("hello").unwrap();
+    s = "hello"_S;
     s.reserve(20);
     EXPECT_GE(s.capacity(), 20);
     EXPECT_EQ(s.size(), 5);
@@ -219,9 +230,9 @@ TEST(StringTest, MakeAsciiLowercase)
 {
     using namespace literal;
 
-    String s = String::from("HELLO").unwrap();
+    String s = String::from("ABCDEFGHIJKLMNOPQRSTUVWXYZ").unwrap();
     s.make_ascii_lowercase();
-    EXPECT_EQ(s, "hello"_s);
+    EXPECT_EQ(s, "abcdefghijklmnopqrstuvwxyz"_s);
 
     // Test non-ASCII characters
     s = String::from("HÉLLO").unwrap();
@@ -233,12 +244,12 @@ TEST(StringTest, MakeAsciiUppercase)
 {
     using namespace literal;
 
-    String s = String::from("hello").unwrap();
+    String s = "abcdefghijklmnopqrstuvwxyz"_S;
     s.make_ascii_uppercase();
-    EXPECT_EQ(s, "HELLO"_s);
+    EXPECT_EQ(s, "ABCDEFGHIJKLMNOPQRSTUVWXYZ"_s);
 
     // Test non-ASCII characters
-    s = String::from("héllo").unwrap();
+    s = "héllo"_S;
     s.make_ascii_uppercase();
     EXPECT_EQ(s, "HéLLO"_s);
 }
@@ -257,7 +268,7 @@ TEST(StringTest, PlusEqualsOperator)
 {
     using namespace literal;
 
-    String s = String::from("hello").unwrap();
+    String s = "hello"_S;
     s += " world"_s;
     EXPECT_EQ(s.size(), 11);
     EXPECT_EQ(s, "hello world"_s);
@@ -266,7 +277,7 @@ TEST(StringTest, PlusEqualsOperator)
     EXPECT_EQ(s.size(), 12);
     EXPECT_EQ(s, "hello world!"_s);
 
-    String s2 = String::from(" hello").unwrap();
+    String s2 = " hello"_S;
     s += s2;
     EXPECT_EQ(s.size(), 18);
     EXPECT_EQ(s, "hello world! hello"_s);
@@ -276,8 +287,8 @@ TEST(StringTest, PlusOperator)
 {
     using namespace literal;
 
-    String s1 = String::from("hello").unwrap();
-    String s2 = String::from(" world").unwrap();
+    String s1 = "hello"_S;
+    String s2 = " world"_S;
     String s3 = s1 + s2;
     EXPECT_EQ(s3.size(), 11);
     EXPECT_EQ(s3, "hello world"_s);

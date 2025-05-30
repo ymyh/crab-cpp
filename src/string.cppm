@@ -62,9 +62,9 @@ public:
         const std::byte* ptr = nullptr;
 
     public:
-        constexpr explicit Iter() = default;
+        constexpr explicit Iter() noexcept = default;
 
-        constexpr explicit Iter(const std::byte* ptr) : ptr(ptr) {}
+        constexpr explicit Iter(const std::byte* ptr) noexcept : ptr(ptr) {}
 
     public:
         constexpr auto operator++() noexcept -> Iter&
@@ -81,12 +81,12 @@ public:
             return temp;
         }
 
-        auto operator*() const -> const std::byte&
+        auto operator*() const noexcept -> const std::byte&
         {
             return *this->ptr;
         }
 
-        auto operator->() const -> const std::byte*
+        auto operator->() const noexcept -> const std::byte*
         {
             return this->ptr;
         }
@@ -865,7 +865,7 @@ public:
      * This method removes the prefix exactly once.
      * @returns A string slice with the prefix removed, if the string does not start with prefix, returns None.
     */
-    [[nodiscard]] auto strip_prefix(const str& pattern) const -> Option<str>
+    [[nodiscard]] auto strip_prefix(const str& pattern) const noexcept -> Option<str>
     {
         if (this->starts_with(pattern))
         {
@@ -880,7 +880,7 @@ public:
      * This method removes the suffix exactly once.
      * @returns A str slice with the prefix removed, if the string does not ends with suffix, returns None.
     */
-    [[nodiscard]] auto strip_suffix(const str& pattern) const -> Option<str>
+    [[nodiscard]] auto strip_suffix(const str& pattern) const noexcept -> Option<str>
     {
         if (this->ends_with(pattern))
         {
@@ -895,7 +895,7 @@ public:
      * This method removes the prefix exactly once.
      * @returns A string slice with the prefix removed, if the string does not start with prefix, returns None.
     */
-    [[nodiscard]] auto strip_prefix(const char* pattern) const -> Option<str>
+    [[nodiscard]] auto strip_prefix(const char* pattern) const noexcept -> Option<str>
     {
         return this->strip_prefix(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::strip_prefix#pattern"));
     }
@@ -905,7 +905,7 @@ public:
      * This method removes the suffix exactly once.
      * @returns A str slice with the prefix removed, if the string does not ends with suffix, returns None.
     */
-    [[nodiscard]] auto strip_suffix(const char* pattern) const -> Option<str>
+    [[nodiscard]] auto strip_suffix(const char* pattern) const noexcept -> Option<str>
     {
         return this->strip_suffix(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::strip_suffix#pattern"));
     }
@@ -940,7 +940,7 @@ public:
      * @brief Returns a str with leading and trailing ASCII whitespace removed.
      * ASCII whitespace refers to U+0020 SPACE, U+0009 HORIZONTAL TAB, U+000A LINE FEED, U+000C FORM FEED, or U+000D CARRIAGE RETURN.
      */
-    [[nodiscard]] auto trim_ascii() const -> str
+    [[nodiscard]] auto trim_ascii() const noexcept -> str
     {
         return this->trim_ascii_start().trim_ascii_end();
     }
@@ -949,62 +949,46 @@ public:
      * @brief Returns a str with leading ASCII whitespace removed.
      * ASCII whitespace refers to U+0020 SPACE, U+0009 HORIZONTAL TAB, U+000A LINE FEED, U+000C FORM FEED, or U+000D CARRIAGE RETURN.
      */
-    [[nodiscard]] auto trim_ascii_start() const -> str
+    [[nodiscard]] auto trim_ascii_start() const noexcept -> str
     {
         if (this->m_len == 0 || this->m_data == nullptr)
         {
             return *this;
         }
 
-        const std::byte* start = this->m_data;
-        const std::byte* end = this->m_data + this->m_len;
-        utf8proc_int32_t codepoint = 0;
-
-        while (start < end)
+        size_t i = 0;
+        for (; i < this->m_len; i += 1)
         {
-            const auto advance = utf8proc_iterate(reinterpret_cast<const utf8proc_uint8_t*>(start),
-                                                        end - start,
-                                                        &codepoint);
-
-            if (!std::bit_cast<Char>(codepoint).is_ascii_whitespace())
+            if (this->m_data[i] != std::byte{0x20})
             {
                 break;
             }
-
-            start += advance;
         }
 
-        return str(start, this->m_len - (start - this->m_data));
+        return str(this->m_data + i, this->m_len - i);
     }
 
     /**
      * @brief Returns a str with leading ASCII whitespace removed.
      * ASCII whitespace refers to U+0020 SPACE, U+0009 HORIZONTAL TAB, U+000A LINE FEED, U+000C FORM FEED, or U+000D CARRIAGE RETURN.
      */
-    [[nodiscard]] auto trim_ascii_end() const -> str
+    [[nodiscard]] auto trim_ascii_end() const noexcept -> str
     {
-        const std::byte* start = this->m_data;
-        const std::byte* end = this->m_data + this->m_len;
-        const std::byte* last_non_ws = start;
-        utf8proc_int32_t codepoint = 0;
-
-        for (const std::byte* p = start; p < end; )
+        if (this->m_len == 0 || this->m_data == nullptr)
         {
-            const auto advance = utf8proc_iterate(reinterpret_cast<const utf8proc_uint8_t*>(p),
-                                                        end - p,
-                                                        &codepoint);
-
-            p += advance;
-
-            if (std::bit_cast<Char>(codepoint).is_ascii_whitespace())
-            {
-                continue;
-            }
-
-            last_non_ws = p;
+            return *this;
         }
 
-        return str(start, last_non_ws - start);
+        size_t i = this->m_len - 1;
+        for (; i >= 0; i -= 1)
+        {
+            if (this->m_data[i] != std::byte{0x20})
+            {
+                break;
+            }
+        }
+
+        return str(this->m_data, i + 1);
     }
 
 // iterators
@@ -1139,7 +1123,7 @@ private:
         const str& s;
 
     public:
-        constexpr explicit Lines(const str& s) : s(s) {}
+        constexpr explicit Lines(const str& s) noexcept : s(s) {}
 
     public:
         [[nodiscard]] constexpr auto begin() const noexcept -> LinesIter
@@ -1246,7 +1230,7 @@ private:
         const str* s;
         plain_str pattern;
 
-        constexpr Matches(const str& s, const plain_str& pattern) : s(&s), pattern(pattern) {}
+        constexpr Matches(const str& s, const plain_str& pattern) noexcept : s(&s), pattern(pattern) {}
 
         [[nodiscard]] constexpr auto begin() const noexcept -> MatchesIter
         {
@@ -1361,7 +1345,7 @@ private:
         plain_str pattern;
 
     public:
-        constexpr Split(const str& s, const plain_str& pattern) : s(&s), pattern(pattern) {}
+        constexpr Split(const str& s, const plain_str& pattern) noexcept : s(&s), pattern(pattern) {}
 
     public:
         [[nodiscard]] constexpr auto begin() const noexcept -> SplitIter
@@ -1605,14 +1589,14 @@ private:
             }
         };
 
-        constexpr explicit Chars(const str& s) : s(&s) {}
+        constexpr explicit Chars(const str& s) noexcept : s(&s) {}
 
-        auto begin() const -> CharsIter
+        auto begin() const noexcept -> CharsIter
         {
             return CharsIter(this->s, 0);
         }
 
-        auto end() const -> CharsIter
+        auto end() const noexcept -> CharsIter
         {
             return CharsIter(this->s, this->s->size());
         }
@@ -1717,14 +1701,14 @@ private:
             }
         };
 
-        constexpr explicit Graphemes(const str& s) : s(&s) {}
+        constexpr explicit Graphemes(const str& s) noexcept : s(&s) {}
 
-        [[nodiscard]] constexpr auto begin() const -> GraphemesIter
+        [[nodiscard]] constexpr auto begin() const noexcept -> GraphemesIter
         {
             return GraphemesIter(this->s, 0);
         }
 
-        [[nodiscard]] constexpr auto end() const -> GraphemesIter
+        [[nodiscard]] constexpr auto end() const noexcept -> GraphemesIter
         {
             return GraphemesIter(this->s, this->s->size());
         }
@@ -2125,23 +2109,13 @@ public:
      */
     auto make_ascii_lowercase() noexcept -> void
     {
-        utf8proc_int32_t codepoint = 0;
-        std::size_t pos = 0;
-
-        while (pos < this->m_len)
+        for (size_t i = 0; i < this->m_len; i += 1)
         {
-            const auto advance = utf8proc_iterate(
-                reinterpret_cast<const utf8proc_uint8_t*>(this->m_data + pos),
-                this->m_len - pos,
-                &codepoint
-            );
-
-            if (codepoint >= 65 && codepoint <= 90)
+            const auto ch = static_cast<std::uint8_t>(this->m_data[i]);
+            if (ch >= 65 && ch <= 90)
             {
-                this->m_data[pos] = static_cast<std::byte>(codepoint + 32);
+                this->m_data[i] = static_cast<std::byte>(ch | 0x20);
             }
-
-            pos += advance;
         }
     }
 
@@ -2151,23 +2125,13 @@ public:
      */
     auto make_ascii_uppercase() noexcept -> void
     {
-        utf8proc_int32_t codepoint = 0;
-        std::size_t pos = 0;
-
-        while (pos < this->m_len)
+        for (size_t i = 0; i < this->m_len; i += 1)
         {
-            const auto advance = utf8proc_iterate(
-                reinterpret_cast<const utf8proc_uint8_t*>(this->m_data + pos),
-                this->m_len - pos,
-                &codepoint
-            );
-
-            if (codepoint >= 97 && codepoint <= 122)
+            const auto ch = static_cast<std::uint8_t>(this->m_data[i]);
+            if (ch >= 97 && ch <= 122)
             {
-                this->m_data[pos] = static_cast<std::byte>(codepoint - 32);
+                this->m_data[i] = static_cast<std::byte>(ch & 0xDF);
             }
-
-            pos += advance;
         }
     }
 
@@ -2181,16 +2145,26 @@ public:
     }
 
     /**
-     * @brief Ensures that the string has enough capacity to store additional bytes
+     * @brief Reserves capacity for at least additional bytes more than the current length.
+     * The allocator may reserve more space to speculatively avoid frequent allocations.
+     * After calling reserve, capacity will be greater than or equal to this->size() + additional.
+     * Does nothing if capacity is already sufficient.
      * @param additional The number of additional bytes to reserve
+     * @panics if the new capacity overflows size_t
      */
     auto reserve(std::size_t additional) -> void
     {
-        const std::size_t new_capacity = this->m_alloc_and_capacity.second + additional;
-        // if (new_capacity <= this->m_alloc_and_capacity.second)
-        // {
-        //     return;
-        // }
+        const std::size_t new_capacity = this->size() + additional;
+
+        if (new_capacity < this->size())
+        {
+            panic("New capacity overflows in String::reserve");
+        }
+
+        if (new_capacity <= this->m_alloc_and_capacity.second)
+        {
+            return;
+        }
 
         // Allocate new memory (add 1 for null terminator)
         pointer new_data = std::allocator_traits<Alloc>::allocate(
@@ -2287,7 +2261,7 @@ public:
      * @param new_len The new length of the string
      * @panics Panics if new_len does not lie on a char boundary.
      */
-    auto truncate(std::size_t new_len) -> void
+    auto truncate(std::size_t new_len) noexcept -> void
     {
         if (new_len >= this->m_len)
         {
@@ -2580,7 +2554,7 @@ template<typename Alloc>
 
 namespace literal
 {
-    [[nodiscard]] auto operator""_s(const char* str, std::size_t) -> crab_cpp::str
+    [[nodiscard]] auto operator""_s(const char* str, std::size_t) noexcept -> crab_cpp::str
     {
         return str::from(str).expect("Invalid UTF-8 sequence while calling operator\"\"_s");
     }
