@@ -437,6 +437,15 @@ public:
     }
 
     /**
+     * @brief Returns a C-style string of this str's contents
+     * @return A C-style string of this str's contents
+     */
+    [[nodiscard]] constexpr auto c_str() const noexcept -> const char*
+    {
+        return std::bit_cast<const char*>(this->m_data);
+    }
+
+    /**
      * @brief Checks if this string contains the given pattern
      * @param pattern The pattern to search for
      * @return true if this string contains the pattern
@@ -2063,6 +2072,15 @@ public:
     [[nodiscard]] constexpr auto as_str() const noexcept -> const str&
     {
         return *(reinterpret_cast<const str*>(this));
+    }
+
+    /**
+     * @brief Returns a C-style string of this String's contents
+     * @return A C-style string of this String's contents
+     */
+    [[nodiscard]] constexpr auto c_str() const noexcept -> const char*
+    {
+        return std::bit_cast<const char*>(this->m_data);
     }
 
     /**
