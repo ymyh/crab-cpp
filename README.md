@@ -11,7 +11,6 @@
     - [Result \<T, E\>](#result-t-e)
     - [Char \& str \& String (Optional feature)](#char--str--string-optional-feature)
   - [Why Crab\_cpp ?](#why-crab_cpp-)
-  - [Todos](#todos)
   - [Thanks](#thanks)
 
 ## Crab_cpp: Rust-like Struct and Function in C++23
@@ -31,7 +30,7 @@ gcc >= 15
 
 msvc >= 1943
 
-clang >= 18 / clang-cl >= 19.1.1
+clang >= 19 / clang-cl >= 19.1.1
 
 ### Features & Usage
 
@@ -196,10 +195,6 @@ Compared to existing corresponding classes, Crab_cpp offers
 - Rust-like APIs
 - Simple pattern matching support
 - UTF-8 based string
-
-### Todos
-- Support C++20
-- Implement more methods
 
 ### Thanks
 [utf8proc](https://github.com/JuliaStrings/utf8proc): Provide utf8 process.
