@@ -1000,6 +1000,67 @@ public:
         return str(this->m_data, i + 1);
     }
 
+    /**
+     * @brief Returns a string slice with all prefixes that match a pattern repeatedly removed.
+     * @param pattern The pattern to search for
+    */
+    [[nodiscard]] auto trim_start_matches(const str& pattern) const noexcept -> str
+    {
+        if (this->m_len == 0 || this->m_data == nullptr || pattern.m_len == 0)
+        {
+            return *this;
+        }
+
+        const std::byte* curr_data = this->m_data;
+        size_t curr_len = this->m_len;
+
+        while (curr_len >= pattern.m_len)
+        {
+            bool matches = std::equal(curr_data, curr_data + pattern.m_len, pattern.m_data);
+
+            if (!matches)
+            {
+                break;
+            }
+
+            curr_data += pattern.m_len;
+            curr_len -= pattern.m_len;
+        }
+
+        return str(curr_data, curr_len);
+    }
+
+    /**
+     * @brief Returns a string slice with all suffixes that match a pattern repeatedly removed.
+     * @param pattern The pattern to search for
+    */
+    [[nodiscard]] auto trim_end_matches(const str& pattern) const noexcept -> str
+    {
+        if (this->m_len == 0 || this->m_data == nullptr || pattern.m_len == 0)
+        {
+            return *this;
+        }
+
+        const std::byte* curr_data = this->m_data;
+        size_t curr_len = this->m_len;
+
+        while (curr_len >= pattern.m_len)
+        {
+            bool matches = std::equal(curr_data + curr_len - pattern.m_len,
+                                    curr_data + curr_len,
+                                    pattern.m_data);
+
+            if (!matches)
+            {
+                break;
+            }
+
+            curr_len -= pattern.m_len;
+        }
+
+        return str(curr_data, curr_len);
+    }
+
 // iterators
 private:
     struct Lines

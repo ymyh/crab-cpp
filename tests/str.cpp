@@ -537,4 +537,70 @@ TEST(StringTest, StrMatches)
     EXPECT_EQ(it, utf8_matches.end());
 }
 
+TEST(StringTest, TrimStartMatches)
+{
+    using namespace literal;
+
+    // Test basic pattern matching
+    auto text = "HelloHelloWorld"_s;
+    auto pattern = "Hello"_s;
+    EXPECT_EQ(text.trim_start_matches(pattern), "World"_s);
+
+    // Test no matches at start
+    auto text2 = "WorldHelloHello"_s;
+    EXPECT_EQ(text2.trim_start_matches(pattern), text2);
+
+    // Test empty pattern
+    auto text3 = "Hello World"_s;
+    auto empty_pattern = ""_s;
+    EXPECT_EQ(text3.trim_start_matches(empty_pattern), text3);
+
+    // Test empty string
+    auto empty_text = ""_s;
+    EXPECT_EQ(empty_text.trim_start_matches(pattern), empty_text);
+
+    // Test UTF-8 pattern matching
+    auto utf8_text = "你好你好世界"_s;
+    auto utf8_pattern = "你好"_s;
+    EXPECT_EQ(utf8_text.trim_start_matches(utf8_pattern), "世界"_s);
+
+    // Test pattern longer than text
+    auto short_text = "Hi"_s;
+    auto long_pattern = "Hello"_s;
+    EXPECT_EQ(short_text.trim_start_matches(long_pattern), short_text);
+}
+
+TEST(StringTest, TrimEndMatches)
+{
+    using namespace literal;
+
+    // Test basic pattern matching
+    auto text = "WorldHelloHello"_s;
+    auto pattern = "Hello"_s;
+    EXPECT_EQ(text.trim_end_matches(pattern), "World"_s);
+
+    // Test no matches at end
+    auto text2 = "HelloHelloWorld"_s;
+    EXPECT_EQ(text2.trim_end_matches(pattern), text2);
+
+    // Test empty pattern
+    auto text3 = "Hello World"_s;
+    auto empty_pattern = ""_s;
+    EXPECT_EQ(text3.trim_end_matches(empty_pattern), text3);
+
+    // Test empty string
+    auto empty_text = ""_s;
+    EXPECT_EQ(empty_text.trim_end_matches(pattern), empty_text);
+
+    // Test UTF-8 pattern matching
+    auto utf8_text = "世界你好你好"_s;
+    auto utf8_pattern = "你好"_s;
+    EXPECT_EQ(utf8_text.trim_end_matches(utf8_pattern), "世界"_s);
+
+    // Test pattern longer than text
+    auto short_text = "Hi"_s;
+    auto long_pattern = "Hello"_s;
+    EXPECT_EQ(short_text.trim_end_matches(long_pattern), short_text);
+}
+
 #endif
