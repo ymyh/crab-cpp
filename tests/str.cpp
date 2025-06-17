@@ -202,6 +202,17 @@ TEST(StringTest, StrSplit)
     }
 
     {
+        auto hello_world = "HelloWorld"_s;
+
+        // Test split
+        auto split = hello_world.split("");
+        auto it = split.begin();
+        EXPECT_EQ(str::from_bytes_unchecked(it->data, it->len), hello_world);
+        ++it;
+        EXPECT_EQ(it, split.end());
+    }
+
+    {
         auto hello_world = " Hello World "_s;
 
         // Test split

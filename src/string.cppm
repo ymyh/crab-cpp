@@ -1379,7 +1379,7 @@ private:
                 start += pattern.len;
 
                 // If reached the end after skipping delimiter, end iteration
-                if (start > this->s->m_len)
+                if (start >= this->s->m_len)
                 {
                     this->s = nullptr;
                     this->span.len = 0;
@@ -2233,6 +2233,11 @@ public:
      */
     auto reserve(std::size_t additional) -> void
     {
+        if (additional > 0 && additional < 16)
+        {
+            additional = 16;
+        }
+
         const std::size_t new_capacity = this->size() + additional;
 
         if (new_capacity < this->size())

@@ -36,7 +36,7 @@ TEST(StringTest, FromRawParts)
     EXPECT_TRUE(result.is_ok());
     s = result.unwrap();
     EXPECT_EQ(s.size(), 5);
-    EXPECT_EQ(s.capacity(), 5);
+    EXPECT_GE(s.capacity(), 5);
     EXPECT_EQ(s, "hello"_s);
 
     // Test invalid UTF-8 string
@@ -61,7 +61,7 @@ TEST(StringTest, From)
     EXPECT_TRUE(result.is_ok());
     s = result.unwrap();
     EXPECT_EQ(s.size(), 5);
-    EXPECT_EQ(s.capacity(), 5);
+    EXPECT_GE(s.capacity(), 5);
     EXPECT_EQ(s, "hello"_s);
 
     // Test invalid UTF-8 string
@@ -86,7 +86,7 @@ TEST(StringTest, MoveConstructor)
     String s1 = String::from("hello").unwrap();
     String s2(std::move(s1));
     EXPECT_EQ(s2.size(), 5);
-    EXPECT_EQ(s2.capacity(), 5);
+    EXPECT_GE(s2.capacity(), 5);
     EXPECT_EQ(s2, "hello"_s);
     EXPECT_EQ(s1.size(), 0);
     EXPECT_EQ(s1.capacity(), 0);
