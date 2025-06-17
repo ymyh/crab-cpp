@@ -2649,6 +2649,39 @@ namespace literal
     }
 }
 
+/**
+ * @brief A hash function for String that supports transparent hashing
+ */
+struct StringHasher
+{
+    using is_transparent = void;
+
+    auto operator()(const char* str) const -> size_t
+    {
+        return std::hash<std::string_view>{}(str);
+    }
+
+    auto operator()(const std::string& str) const -> size_t
+    {
+        return std::hash<std::string_view>{}(str);
+    }
+
+    auto operator()(const std::string_view& str) const -> size_t
+    {
+        return std::hash<std::string_view>{}(str);
+    }
+
+    auto operator()(const str& str) const -> size_t
+    {
+        return std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char*>(str.data()), str.size()));
+    }
+
+    auto operator()(const String& str) const -> size_t
+    {
+        return std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char*>(str.data()), str.size()));
+    }
+};
+
 }
 
 template<>
