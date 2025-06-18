@@ -2539,6 +2539,36 @@ public:
         return std::equal(this->m_data, this->m_data + this->m_len, other.m_data);
     }
 
+    [[nodiscard]] constexpr auto operator==(const str& other) const noexcept -> bool
+    {
+        if (this->size() != other.size())
+        {
+            return false;
+        }
+
+        return std::equal(this->data(), this->data() + this->size(), other.data());
+    }
+
+    [[nodiscard]] constexpr auto operator==(const std::string& other) const noexcept -> bool
+    {
+        if (this->size() != other.size())
+        {
+            return false;
+        }
+
+        return std::equal(this->data(), this->data() + this->size(), other.data());
+    }
+
+    [[nodiscard]] constexpr auto operator==(const char* other) const noexcept -> bool
+    {
+        if (this->size() != std::strlen(other))
+        {
+            return false;
+        }
+
+        return std::equal(this->data(), this->data() + this->size(), reinterpret_cast<const std::byte*>(other));
+    }
+
 private:
     /**
      * For internal use
@@ -2560,49 +2590,19 @@ private:
 
 using String = raw::String<std::allocator<std::byte>>;
 
-template<typename Alloc>
-[[nodiscard]] constexpr auto operator==(const raw::String<Alloc>& lhs, const str& rhs) noexcept -> bool
-{
-    if (lhs.size() != rhs.size())
-    {
-        return false;
-    }
-    return std::equal(lhs.data(), lhs.data() + lhs.size(), rhs.data());
-}
-
-template<typename Alloc>
+template<typename Alloc = std::allocator<std::byte>>
 [[nodiscard]] constexpr auto operator==(const str& lhs, const raw::String<Alloc>& rhs) noexcept -> bool
 {
     return rhs == lhs;
 }
 
-template<typename Alloc>
-[[nodiscard]] constexpr auto operator==(const raw::String<Alloc>& lhs, const std::string& rhs) noexcept -> bool
-{
-    if (lhs.size() != rhs.size())
-    {
-        return false;
-    }
-    return std::equal(lhs.data(), lhs.data() + lhs.size(), rhs.data());
-}
-
-template<typename Alloc>
+template<typename Alloc = std::allocator<std::byte>>
 [[nodiscard]] constexpr auto operator==(const std::string& lhs, const raw::String<Alloc>& rhs) noexcept -> bool
 {
     return rhs == lhs;
 }
 
-template<typename Alloc>
-[[nodiscard]] auto operator==(const raw::String<Alloc>& lhs, const char* rhs) noexcept -> bool
-{
-    if (lhs.size() != std::strlen(rhs))
-    {
-        return false;
-    }
-    return std::equal(lhs.data(), lhs.data() + lhs.size(), reinterpret_cast<const std::byte*>(rhs));
-}
-
-template<typename Alloc>
+template<typename Alloc = std::allocator<std::byte>>
 [[nodiscard]] auto operator==(const char* lhs, const raw::String<Alloc>& rhs) noexcept -> bool
 {
     return rhs == lhs;
