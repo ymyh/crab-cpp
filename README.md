@@ -31,7 +31,7 @@ package("crab_cpp")
     add_versions("0.1.0", "215cba62efccfba0a1db6b30781a57dfe157fa003fd1675dee023b014fe457bc")
     add_configs("enableString", {description = "Enable string module", default = false, type = "boolean"})
     add_configs("enableBacktrace", {description = "Enable backtrace", default = false, type = "boolean"})
-    add_configs("enableTests", {description = "Enable tests", default = false, type = "boolean"})
+    add_configs("enableTests", {description = "Run tests after installation", default = false, type = "boolean"})
 
     on_install(function (package)
 
@@ -67,6 +67,10 @@ package("crab_cpp")
 package_end()
 
 add_requires("crab_cpp", {configs = { enableString = true }})
+-- if you have set enableString = true, you will need this and add_packages("utf8proc") in your targets
+add_requires("utf8proc")
+-- same reason for gtest if you set enableTests = true
+add_requires("gtest", {configs = {main = true}})
 
 -- your targets...
 ```
