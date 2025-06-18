@@ -20,6 +20,56 @@ Crab_cpp is a C++23 library that simulates Rust's Option<T>, Result<T, E>, panic
 
 ### Compilation
 Currently use [xmake](https://github.com/xmake-io/xmake) to compile this library. Welcome to contribute if you need more build systems.
+Here is a boilerplate code that can introduce `crab_cpp` to your xmake project:
+
+```lua
+package("crab_cpp")
+
+    set_kind("library", {moduleonly = true})
+    set_urls("https://github.com/ymyh/crab-cpp/releases/download/v$(version)/crab_cpp-$(version).tar.gz")
+
+    add_versions("0.1.0", "215cba62efccfba0a1db6b30781a57dfe157fa003fd1675dee023b014fe457bc")
+    add_configs("enableString", {description = "Enable string module", default = false, type = "boolean"})
+    add_configs("enableBacktrace", {description = "Enable backtrace", default = false, type = "boolean"})
+    add_configs("enableTests", {description = "Enable tests", default = false, type = "boolean"})
+
+    on_install(function (package)
+
+        local configs = {}
+
+        if package:config("enableString") then
+            package:add("defines", "CRAB_CPP_ENABLE_STRING")
+            table.insert(configs, "--enable-string=y")
+        end
+
+        if package:config("enableBacktrace") then
+            package:add("defines", "CRAB_CPP_ENABLE_BACKTRACE")
+            table.insert(configs, "--enable-backtrace=y")
+        end
+
+        if package:config("enableTests") then
+            table.insert(configs, "--enable-test=y")
+        end
+
+        package:add("includedirs", "include")
+        os.cp("include/crab_cpp/*.h", package:installdir("include", "crab_cpp"))
+
+        import("package.tools.xmake").install(package, configs)
+    end)
+
+    on_test(function (package)
+
+        if package:config("enableTests") then
+            os.exec(path.join(package:installdir(), "bin", "crab_cpp_test"))
+        end
+    end)
+
+package_end()
+
+add_requires("crab_cpp", {configs = { enableString = true }})
+
+-- your targets...
+```
 
 #### Options
 --enable-string: defines macro `CRAB_CPP_ENABLE_STRING`
