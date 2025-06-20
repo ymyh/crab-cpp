@@ -6,12 +6,6 @@ import crab_cpp;
 
 using namespace crab_cpp;
 
-#include <gtest/gtest.h>
-
-import crab_cpp;
-
-using namespace crab_cpp;
-
 TEST(StringTest, DefaultConstructor)
 {
     String s;

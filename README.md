@@ -19,7 +19,10 @@
 Crab_cpp is a C++23 library that simulates Rust's Option<T>, Result<T, E>, panic!, unimplemented!, a match macro and optional Char, str, String to modern C++. Designed for developers who appreciate Rust's explicit error handling and pattern matching but work in C++ ecosystems. This library supports only C++23 and depends on std module.
 
 ### Compilation
-Currently use [xmake](https://github.com/xmake-io/xmake) to compile this library. Welcome to contribute if you need more build systems.
+Currently, we use cmake or [xmake](https://github.com/xmake-io/xmake) to compile this library. Welcome to contribute if you need more build systems.
+
+Use `FetchContent` to introduce `crab_cpp` to your cmake project.
+
 Here is a boilerplate code that can introduce `crab_cpp` to your xmake project:
 
 ```lua

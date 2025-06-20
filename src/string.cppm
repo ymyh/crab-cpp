@@ -118,12 +118,12 @@ struct FromUtf8Error
     /**
      * @brief The position where the invalid UTF-8 sequence was found
      */
-    std::size_t pos;
+    size_t pos;
 
     /**
      * @brief Constructs a FromUtf8Error with the given position
      */
-    constexpr explicit FromUtf8Error(std::size_t pos) noexcept : pos(pos) {}
+    constexpr explicit FromUtf8Error(size_t pos) noexcept : pos(pos) {}
 };
 
 /**
@@ -132,7 +132,7 @@ struct FromUtf8Error
  * @param len The length of the string in bytes
  * @return true if the string is valid UTF-8
  */
-[[nodiscard]] constexpr auto is_valid_utf8(const std::byte* str, std::size_t len) noexcept -> bool
+[[nodiscard]] constexpr auto is_valid_utf8(const std::byte* str, size_t len) noexcept -> bool
 {
     if (str == nullptr || len == 0)
     {
@@ -140,7 +140,7 @@ struct FromUtf8Error
     }
 
     utf8proc_int32_t codepoint;
-    std::size_t pos = 0;
+    size_t pos = 0;
 
     while (pos < len)
     {
@@ -159,7 +159,7 @@ struct FromUtf8Error
     return true;
 }
 
-[[nodiscard]] constexpr auto is_valid_utf8(const char* str, std::size_t len) noexcept -> bool
+[[nodiscard]] constexpr auto is_valid_utf8(const char* str, size_t len) noexcept -> bool
 {
     return is_valid_utf8(std::bit_cast<const std::byte*>(str), len);
 }
@@ -181,7 +181,7 @@ public:
     /**
      * @brief Constructs a Char from a Unicode scalar value
      * @param value The Unicode scalar value
-     * @panics If the value is not a valid Unicode scalar value
+     * @note Panics If the value is not a valid Unicode scalar value
      */
     constexpr explicit Char(std::uint32_t value) : m_value(value)
     {
@@ -193,7 +193,6 @@ public:
 
 private:
     /**
-     * @brief Checks if a value is a valid Unicode scalar value
      * @param value The value to check
      * @return true if the value is a valid Unicode scalar value
      */
@@ -205,7 +204,6 @@ private:
 
 public:
     /**
-     * @brief Returns the Unicode scalar value of this char
      * @return The Unicode scalar value
      */
     [[nodiscard]] constexpr auto code_point() const noexcept -> std::uint32_t
@@ -214,7 +212,6 @@ public:
     }
 
     /**
-     * @brief Returns true if this char is an ASCII character
      * @return true if this char is an ASCII character
      */
     [[nodiscard]] constexpr auto is_ascii() const noexcept -> bool
@@ -223,7 +220,6 @@ public:
     }
 
     /**
-     * @brief Returns true if this char is an ASCII alphabetic character
      * @return true if this char is an ASCII alphabetic character
      */
     [[nodiscard]] constexpr auto is_ascii_alphabetic() const noexcept -> bool
@@ -233,7 +229,6 @@ public:
     }
 
     /**
-     * @brief Returns true if this char is an ASCII alphanumeric character
      * @return true if this char is an ASCII alphanumeric character
      */
     [[nodiscard]] constexpr auto is_ascii_alphanumeric() const noexcept -> bool
@@ -244,7 +239,6 @@ public:
     }
 
     /**
-     * @brief Returns true if this char is an ASCII lowercase character
      * @return true if this char is an ASCII lowercase character
      */
     [[nodiscard]] constexpr auto is_ascii_lowercase() const noexcept -> bool
@@ -262,7 +256,6 @@ public:
     }
 
     /**
-     * @brief Returns true if this char is an ASCII control character
      * @details Checks if the value is an ASCII control character: U+0000 NUL ..= U+001F UNIT SEPARATOR, or U+007F DELETE.
      *          Note that most ASCII whitespace characters are control characters, but SPACE is not.
      * @return true if this char is an ASCII control character
@@ -273,7 +266,6 @@ public:
     }
 
     /**
-     * @brief Returns true if this char is an ASCII whitespace character
      * @details Checks if the value is an ASCII whitespace character:
      *          - U+0020 SPACE
      *          - U+0009 HORIZONTAL TAB
@@ -328,12 +320,12 @@ struct str
 
 private:
     pointer m_data;
-    std::size_t m_len;
+    size_t m_len;
 
     /**
      * @brief Private constructor for internal use
      */
-    constexpr str(pointer data, std::size_t len) noexcept : m_data(data), m_len(len) {}
+    constexpr str(pointer data, size_t len) noexcept : m_data(data), m_len(len) {}
 
 public:
     /**
@@ -364,7 +356,7 @@ public:
      * @param len Length of the string
      * @return A Result containing either a str or a FromUtf8Error
      */
-    [[nodiscard]] static constexpr auto from_raw_parts(const char* data, std::size_t len) noexcept -> Result<str, FromUtf8Error>
+    [[nodiscard]] static constexpr auto from_raw_parts(const char* data, size_t len) noexcept -> Result<str, FromUtf8Error>
     {
         if (data == nullptr && len > 0)
         {
@@ -375,7 +367,7 @@ public:
         {
             // Find the position of the invalid UTF-8 sequence
             utf8proc_int32_t codepoint;
-            std::size_t pos = 0;
+            size_t pos = 0;
 
             while (pos < len)
             {
@@ -402,13 +394,13 @@ public:
      * @param len Length of the string
      * @return A str containing the string data
      */
-    [[nodiscard]] static constexpr auto from_bytes_unchecked(pointer data, std::size_t len) noexcept -> str
+    [[nodiscard]] static constexpr auto from_bytes_unchecked(pointer data, size_t len) noexcept -> str
     {
         return str(data, len);
     }
 
     /**
-     * @brief Creates a string view from a null-terminated string
+     * @brief Creates a string view from a null-terminated, UTF-8 encoded C style string
      * @param data Pointer to null-terminated string
      * @return A Result containing either a str or a FromUtf8Error
      */
@@ -531,7 +523,7 @@ public:
     /**
      * @brief Creates a new String by repeating a string n times.
      * @param n The number of times to repeat the string
-     * @panics This function will panic if the capacity would overflow.
+     * @note Panics if the capacity overflows.
      */
     template<typename Alloc = std::allocator<std::byte>>
     constexpr auto repeat(size_t n) const -> raw::String<Alloc>
@@ -541,7 +533,7 @@ public:
             return raw::String<Alloc>();
         }
 
-        if (n > std::numeric_limits<std::size_t>::max() / this->m_len)
+        if (n > std::numeric_limits<size_t>::max() / this->m_len)
         {
             panic("Repeat times overflow");
         }
@@ -563,7 +555,7 @@ public:
     /**
      * @brief Returns the length of the string in bytes
      */
-    [[nodiscard]] constexpr auto size() const noexcept -> std::size_t
+    [[nodiscard]] constexpr auto size() const noexcept -> size_t
     {
         return this->m_len;
     }
@@ -572,11 +564,11 @@ public:
      * @brief Returns a sub str of the given range
      * @param from the sub str beginning index
      * @param to the sub str ending index (inclusive)
-     * @panics
+     * @note Panics
         - If `from` or `to` exceeded str's length
         - If `to` is greater than `from`
      */
-    [[nodiscard]] constexpr auto slice(std::size_t from, std::size_t to) const noexcept -> str
+    [[nodiscard]] constexpr auto slice(size_t from, size_t to) const noexcept -> str
     {
         if (from > this->m_len || to > this->m_len || std::min(from, to) > this->m_len)
         {
@@ -596,7 +588,7 @@ public:
      * @brief Returns a sub str of the given range
      * @see str::slice(size_t, size_t) overload for details
      */
-    [[nodiscard]] constexpr auto slice(std::size_t from) const noexcept -> str
+    [[nodiscard]] constexpr auto slice(size_t from) const noexcept -> str
     {
         return this->slice(from, this->m_len);
     }
@@ -659,7 +651,7 @@ public:
      * @param pattern The pattern to search for
      * @return Option containing the byte index of the first match, or None if not found
      */
-    [[nodiscard]] constexpr auto find(const str& pattern) const noexcept -> Option<std::size_t>
+    [[nodiscard]] constexpr auto find(const str& pattern) const noexcept -> Option<size_t>
     {
         if (pattern.m_len > this->m_len || pattern.m_len == 0)
         {
@@ -687,7 +679,7 @@ public:
      * @param pattern The pattern to search for
      * @return Option containing the byte index of the first match, or None if not found
      */
-    [[nodiscard]] constexpr auto find(const char* pattern) const noexcept -> Option<std::size_t>
+    [[nodiscard]] constexpr auto find(const char* pattern) const noexcept -> Option<size_t>
     {
         return this->find(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::find#pattern"));
     }
@@ -757,7 +749,7 @@ public:
     template<typename Alloc = std::allocator<std::byte>>
     constexpr auto replace(const str& pattern, const str& replacement) const -> raw::String<Alloc>
     {
-        return this->replace_n<Alloc>(pattern, replacement, std::numeric_limits<std::size_t>::max());
+        return this->replace_n<Alloc>(pattern, replacement, std::numeric_limits<size_t>::max());
     }
 
     /**
@@ -785,7 +777,7 @@ public:
      * @returns a new String
      */
     template<typename Alloc = std::allocator<std::byte>>
-    constexpr auto replace_n(const str& pattern, const str& replacement, std::size_t n) const -> raw::String<Alloc>
+    constexpr auto replace_n(const str& pattern, const str& replacement, size_t n) const -> raw::String<Alloc>
     {
         auto string = raw::String<Alloc>();
 
@@ -800,15 +792,15 @@ public:
         const auto size_diff = replacement.size() > pattern.size()
             ? replacement.size() - pattern.size()
             : 0;
-        std::size_t max_size = this->m_len + size_diff * std::min(n, this->m_len / pattern.size());
+        size_t max_size = this->m_len + size_diff * std::min(n, this->m_len / pattern.size());
         string.reserve(max_size);
 
-        std::size_t pos = 0;
-        std::size_t count = 0;
+        size_t pos = 0;
+        size_t count = 0;
 
         while (pos < this->m_len && count < n)
         {
-            const Option<std::size_t> found = this->slice(pos).find(pattern);
+            const Option<size_t> found = this->slice(pos).find(pattern);
             if (found.is_none())
             {
                 break;
@@ -839,7 +831,7 @@ public:
      * @param pattern The pattern to search for
      * @returns `None` if the pattern doesn’t match.
      */
-    [[nodiscard]] constexpr auto rfind(const str& pattern) const noexcept -> Option<std::size_t>
+    [[nodiscard]] constexpr auto rfind(const str& pattern) const noexcept -> Option<size_t>
     {
         if (pattern.m_len > this->m_len || pattern.m_len == 0)
         {
@@ -864,7 +856,7 @@ public:
      * @param pattern The pattern to search for
      * @returns `None` if the pattern doesn’t match.
      */
-    [[nodiscard]] constexpr auto rfind(const char* pattern) const noexcept -> Option<std::size_t>
+    [[nodiscard]] constexpr auto rfind(const char* pattern) const noexcept -> Option<size_t>
     {
         return this->rfind(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::rfind#pattern"));
     }
@@ -1085,12 +1077,12 @@ private:
                 {
                     // Initialize the first line
                     auto bytes = s->as_bytes();
-                    std::size_t pos = 0;
+                    size_t pos = 0;
 
                     // Find the first line ending
                     while (pos < bytes.size())
                     {
-                        std::size_t start = 0;
+                        size_t start = 0;
                         if (bytes[pos] == std::byte{'\n'})
                         {
                             span = plain_str(bytes.data() + start, pos - start);
@@ -1138,7 +1130,7 @@ private:
                 }
 
                 auto bytes = this->s->as_bytes();
-                std::size_t start = span.data - bytes.data() + this->span.len + this->skip;
+                size_t start = span.data - bytes.data() + this->span.len + this->skip;
 
                 // If we're at or past the end, mark as finished
                 if (start >= bytes.size())
@@ -1149,7 +1141,7 @@ private:
                 }
 
                 // Find the next line ending
-                std::size_t pos = start;
+                size_t pos = start;
                 while (pos < bytes.size())
                 {
                     if (bytes[pos] == std::byte{'\n'})
@@ -1213,14 +1205,14 @@ private:
         {
             using iterator_category = std::forward_iterator_tag;
             using difference_type = std::ptrdiff_t;
-            using value_type = std::size_t;
-            using pointer = const std::size_t*;
-            using reference = const std::size_t&;
+            using value_type = size_t;
+            using pointer = const size_t*;
+            using reference = const size_t&;
 
             const str* s = nullptr;
             plain_str pattern;
-            std::size_t match_pos = 0;
-            std::size_t pos = 0;
+            size_t match_pos = 0;
+            size_t pos = 0;
 
             constexpr MatchesIter() noexcept = default;
 
@@ -1373,7 +1365,7 @@ private:
                     return *this;
                 }
 
-                std::size_t start = span.data - this->s->m_data + span.len;
+                size_t start = span.data - this->s->m_data + span.len;
 
                 // Skip the delimiter
                 start += pattern.len;
@@ -1613,7 +1605,7 @@ private:
             using reference = const Char&;
 
             const str* s = nullptr;
-            std::size_t pos = 0;
+            size_t pos = 0;
             Char ch;
 
             constexpr explicit CharsIter() noexcept = default;
@@ -1688,7 +1680,7 @@ private:
             using reference = const plain_str&;
 
             const str* s = nullptr;
-            std::size_t pos = 0;
+            size_t pos = 0;
             utf8proc_int32_t state = 0;
             plain_str current;
 
@@ -1711,7 +1703,7 @@ private:
 
                 utf8proc_int32_t codepoint1 = 0;
                 utf8proc_int32_t codepoint2 = 0;
-                std::size_t start_pos = this->pos;
+                size_t start_pos = this->pos;
 
                 // Get the first codepoint
                 auto advance = utf8proc_iterate(
@@ -1849,7 +1841,7 @@ public:
      * @brief Returns an iterator that splits the string by the given pattern
      * @param pattern The pattern to split on
      * @return A Split iterator that yields each part of the split string
-     * @panics If pattern is not a valid UTF-8 sequence
+     * @note Panics If the pattern is not a valid UTF-8 sequence
      */
     [[nodiscard]] auto split(const char* pattern) const noexcept -> Split
     {
@@ -1898,8 +1890,8 @@ public:
         }
 
         // Compare byte by byte until we find a difference
-        const std::size_t min_len = std::min(this->m_len, other.m_len);
-        for (std::size_t i = 0; i < min_len; ++i)
+        const size_t min_len = std::min(this->m_len, other.m_len);
+        for (size_t i = 0; i < min_len; ++i)
         {
             if (this->m_data[i] != other.m_data[i])
             {
@@ -1951,7 +1943,7 @@ namespace raw
 {
 
 /**
- * @brief A UTF-8–encoded, null-terminated, growable string with custom allocator support
+ * @brief A UTF-8 encoded, null-terminated, growable string with custom allocator support
  * @tparam Alloc The allocator type to use for memory management
  */
 template<typename Alloc = std::allocator<std::byte>>
@@ -1962,20 +1954,20 @@ struct String
 
 private:
     pointer m_data = nullptr;
-    std::size_t m_len = 0;
+    size_t m_len = 0;
     compressed_pair<Alloc, size_t> m_alloc_and_capacity;
 
     /**
      * @brief Private constructor for internal use
      */
-    String(const Alloc& alloc, pointer data, std::size_t len, std::size_t capacity) noexcept
+    String(const Alloc& alloc, pointer data, size_t len, size_t capacity) noexcept
         : m_data(data), m_len(len), m_alloc_and_capacity(alloc, capacity) {}
 
     /**
      * @brief Allocates memory for the string
      * @param capacity The capacity to allocate in bytes
      */
-    auto allocate(std::size_t capacity) -> void
+    auto allocate(size_t capacity) -> void
     {
         if (capacity == 0)
         {
@@ -2044,7 +2036,7 @@ public:
      * @param alloc The allocator to use
      * @return A Result containing either a String or a FromUtf8Error
      */
-    [[nodiscard]] static auto from_raw_parts(const char* str, std::size_t len, const Alloc& alloc = Alloc()) -> Result<String, FromUtf8Error>
+    [[nodiscard]] static auto from_raw_parts(const char* str, size_t len, const Alloc& alloc = Alloc()) -> Result<String, FromUtf8Error>
     {
         auto alloc_copy = alloc;
 
@@ -2066,7 +2058,7 @@ public:
     }
 
     /**
-     * @brief Creates a string from a null-terminated UTF-8 string
+     * @brief Creates a string from a null-terminated, UTF-8 encoded C style string
      * @param str The input string
      * @param alloc The allocator to use
      * @return A Result containing either a String or a FromUtf8Error
@@ -2148,7 +2140,7 @@ public:
      * @brief Returns the current capacity of the buffer in bytes
      * @return The capacity in bytes
      */
-    [[nodiscard]] constexpr auto capacity() const noexcept -> std::size_t
+    [[nodiscard]] constexpr auto capacity() const noexcept -> size_t
     {
         return this->m_alloc_and_capacity.second;
     }
@@ -2218,7 +2210,7 @@ public:
      * @brief Returns the current length of the string in bytes
      * @return The length in bytes
      */
-    [[nodiscard]] constexpr auto size() const noexcept -> std::size_t
+    [[nodiscard]] constexpr auto size() const noexcept -> size_t
     {
         return this->m_len;
     }
@@ -2229,16 +2221,16 @@ public:
      * After calling reserve, capacity will be greater than or equal to this->size() + additional.
      * Does nothing if capacity is already sufficient.
      * @param additional The number of additional bytes to reserve
-     * @panics if the new capacity overflows size_t
+     * @note Panics if the new capacity overflows size_t
      */
-    auto reserve(std::size_t additional) -> void
+    auto reserve(size_t additional) -> void
     {
         if (additional > 0 && additional < 16)
         {
             additional = 16;
         }
 
-        const std::size_t new_capacity = this->size() + additional;
+        const size_t new_capacity = this->size() + additional;
 
         if (new_capacity < this->size())
         {
@@ -2303,9 +2295,9 @@ public:
      * @brief Splits the string into two at the given byte index
      * @param at The byte index at which to split
      * @return A newly allocated String containing bytes [at, len)
-     * @panics If at is not on a UTF-8 code point boundary, or if it is beyond the last code point
+     * @note Panics If at is not on a UTF-8 code point boundary, or if it is beyond the last code point
      */
-    auto split_off(std::size_t at) -> String
+    auto split_off(size_t at) -> String
     {
         if (at >= this->m_len)
         {
@@ -2343,9 +2335,9 @@ public:
      * @details If new_len is greater than or equal to the string's current length, this has no effect.
      *          Note that this method has no effect on the allocated capacity of the string
      * @param new_len The new length of the string
-     * @panics Panics if new_len does not lie on a char boundary.
+     * @note Panics if new_len does not lie on a char boundary.
      */
-    auto truncate(std::size_t new_len) noexcept -> void
+    auto truncate(size_t new_len) noexcept -> void
     {
         if (new_len >= this->m_len)
         {
@@ -2373,7 +2365,7 @@ public:
         }
 
         // Find the start of the last UTF-8 sequence by scanning backwards
-        std::size_t start = this->m_len - 1;
+        size_t start = this->m_len - 1;
         while (start > 0 && (this->m_data[start] & std::byte{0xC0}) == std::byte{0x80})
         {
             start -= 1;
@@ -2434,7 +2426,7 @@ public:
             panic("Failed to encode Unicode scalar value to UTF-8");
         }
 
-        const std::size_t new_len = this->m_len + static_cast<std::size_t>(len);
+        const size_t new_len = this->m_len + static_cast<size_t>(len);
         if (new_len > this->m_alloc_and_capacity.second)
         {
             this->reserve(new_len - this->m_alloc_and_capacity.second);
@@ -2470,7 +2462,7 @@ public:
             return *this;
         }
 
-        const std::size_t new_len = this->m_len + str.size();
+        const size_t new_len = this->m_len + str.size();
         if (new_len > this->m_alloc_and_capacity.second)
         {
             this->reserve(new_len - this->m_alloc_and_capacity.second);
@@ -2575,7 +2567,7 @@ private:
      */
     auto push_str_unchecked(const str& str) noexcept
     {
-        const std::size_t new_len = this->m_len + str.size();
+        const size_t new_len = this->m_len + str.size();
         std::copy(str.data(), str.data() + str.size(), this->m_data + this->m_len);
 
         this->m_len = new_len;
@@ -2638,12 +2630,12 @@ template<typename Alloc = std::allocator<std::byte>>
 
 namespace literal
 {
-    [[nodiscard]] auto operator""_s(const char* str, std::size_t) noexcept -> crab_cpp::str
+    [[nodiscard]] auto operator""_s(const char* str, size_t) noexcept -> crab_cpp::str
     {
         return str::from(str).expect("Invalid UTF-8 sequence while calling operator\"\"_s");
     }
 
-    [[nodiscard]] auto operator""_S(const char* str, std::size_t) -> String
+    [[nodiscard]] auto operator""_S(const char* str, size_t) -> String
     {
         return String::from(str).ok().expect_take("Invalid UTF-8 sequence while calling operator\"\"_S");
     }
