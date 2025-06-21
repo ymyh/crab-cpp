@@ -183,7 +183,7 @@ struct Result : std::variant<T, E>
      * @tparam Self The type of self
      * @param msg The panic message to display if Err
      * @return Reference to the contained value
-     * @panics if Err with the given message
+     * @note Panics if Err with the given message
      */
     template<typename Self>
     auto expect(this Self&& self, std::string_view msg) noexcept -> auto&&
@@ -201,7 +201,7 @@ struct Result : std::variant<T, E>
      * @tparam Self The type of self
      * @param msg The panic message to display if Ok
      * @return Reference to the contained error
-     * @panics if Ok with the given message
+     * @note Panics if Ok with the given message
      */
     template<typename Self>
     auto expect_err(this Self&& self, std::string_view msg) noexcept -> auto&&
@@ -218,7 +218,7 @@ struct Result : std::variant<T, E>
      * @brief Returns reference if Ok
      * @tparam Self The type of self
      * @return Reference to the contained value
-     * @panics if Err
+     * @note Panics if Err
      */
     template<typename Self>
     auto unwrap(this Self&& self) noexcept -> auto&&
@@ -235,7 +235,7 @@ struct Result : std::variant<T, E>
      * @brief Returns Err reference
      * @tparam Self The type of self
      * @return Reference to the contained error
-     * @panics if Ok
+     * @note Panics if Ok
      */
     template<typename Self>
     auto unwrap_err(this Self&& self) noexcept -> auto&&

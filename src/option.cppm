@@ -53,7 +53,7 @@ struct Option<T> : std::variant<None, T>
      * @brief Returns the contained Some value, leaving None in its place
      * @param msg The panic message to display if the value is None
      * @return The contained value
-     * @panics if the value is None
+     * @note Panics if the value is None
      */
     auto expect_take(std::string_view msg) -> T
     {
@@ -73,7 +73,7 @@ struct Option<T> : std::variant<None, T>
      * @tparam Self The type of self
      * @param msg The panic message to display if the value is None
      * @return Reference to the contained value
-     * @panics if the value is None
+     * @note Panics if the value is None
      */
     template<typename Self>
     auto expect(this Self&& self, std::string_view msg) -> decltype(auto)
@@ -194,7 +194,7 @@ struct Option<T> : std::variant<None, T>
     /**
      * @brief Takes the value out of the option, leaving a None in its place
      * @return The contained value
-     * @panics if the value is None
+     * @note Panics if the value is None
      */
     auto take() noexcept -> T
     {
@@ -269,7 +269,7 @@ struct Option<T> : std::variant<None, T>
      * @brief Returns the contained Some value reference
      * @tparam Self The type of self
      * @return Reference to the contained value
-     * @panics if the value is None
+     * @note Panics if the value is None
      */
     template<typename Self>
     [[nodiscard]] auto unwrap(this Self&& self) noexcept -> decltype(auto)
@@ -350,7 +350,7 @@ public:
      * @tparam Self The type of self
      * @param msg The panic message to display if pointer is null
      * @return The pointer
-     * @panics if pointer is null
+     * @note Panics if pointer is null
      */
     template<typename Self>
     auto expect(this Self&& self, std::string_view msg) -> decltype(auto)
@@ -367,7 +367,7 @@ public:
      * @brief Returns pointer if pointer is not null, otherwise panics
      * @param msg The panic message to display if pointer is null
      * @return The pointer
-     * @panics if pointer is null
+     * @note Panics if pointer is null
      */
     auto expect_take(std::string_view msg) -> T
     {
@@ -446,7 +446,7 @@ public:
     /**
      * @brief Takes the pointer out of the option, leaving a None in its place
      * @return The contained pointer
-     * @panics if the pointer is null
+     * @note Panics if the pointer is null
      */
     auto take() noexcept -> T
     {
@@ -457,7 +457,7 @@ public:
      * @brief Returns pointer if pointer is not null, otherwise panics
      * @tparam Self The type of self
      * @return The pointer
-     * @panics if pointer is null
+     * @note Panics if pointer is null
      */
     template<typename Self>
     auto unwrap(this Self&& self) noexcept -> decltype(auto)
@@ -520,7 +520,7 @@ public:
      * @tparam Self The type of self
      * @param msg The panic message to display if pointer is null
      * @return The reference
-     * @panics if pointer is null
+     * @note Panics if pointer is null
      */
     template<typename Self>
     auto expect(this Self&& self, std::string_view msg) -> T
@@ -537,7 +537,7 @@ public:
      * @brief Returns reference if pointer is not null, otherwise panics
      * @param msg The panic message to display if pointer is null
      * @return The reference
-     * @panics if pointer is null
+     * @note Panics if pointer is null
      */
     auto expect_take(std::string_view msg) -> T
     {
@@ -634,7 +634,7 @@ public:
     /**
      * @brief Takes the reference out of the option, leaving a None in its place
      * @return The contained reference
-     * @panics if the reference is null
+     * @note Panics if the reference is null
      */
     auto take() noexcept -> T
     {
@@ -645,7 +645,7 @@ public:
      * @brief Returns reference if pointer is not null, otherwise panics
      * @tparam Self The type of self
      * @return The reference
-     * @panics if pointer is null
+     * @note Panics if pointer is null
      */
     template<typename Self>
     constexpr auto unwrap(this Self&& self) noexcept -> decltype(auto)
