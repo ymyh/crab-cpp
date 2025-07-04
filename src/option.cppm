@@ -182,12 +182,12 @@ struct Option<T> : std::variant<None, T>
         if (this->is_some())
         {
             auto temp = std::move(std::get<1>(*this));
-            (*this) = std::move(t);
+            *this = std::move(t);
 
             return temp;
         }
 
-        (*this) = std::move(t);
+        *this = std::move(t);
         return None{};
     }
 

@@ -215,6 +215,25 @@ struct Result : std::variant<T, E>
     }
 
     /**
+     * @brief Replaces the actual value in the option by the value given in parameter
+     * @param t The new value to store
+     * @return The old value if Ok, None otherwise
+     */
+    auto replace(T&& t) noexcept -> Option<T>
+    {
+        if (this->is_ok())
+        {
+            auto temp = std::move(std::get<0>(*this));
+            (*this) = std::move(t);
+
+            return temp;
+        }
+
+        *this = std::move(t);
+        return None{};
+    }
+
+    /**
      * @brief Returns reference if Ok
      * @tparam Self The type of self
      * @return Reference to the contained value

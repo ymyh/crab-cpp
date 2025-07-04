@@ -145,3 +145,20 @@ TEST(ResultTest, Inspect)
     EXPECT_TRUE(error.empty());
     EXPECT_TRUE(ok.is_ok());
 }
+
+TEST(ResultTest, Replace)
+{
+    {
+        auto ok = Result<int, std::string>(42);
+        auto opt = ok.replace(84);
+        EXPECT_EQ(ok.unwrap(), 84);
+        EXPECT_EQ(opt.unwrap(), 42);
+    }
+
+    {
+        auto err = Result<int, std::string>("error");
+        auto opt = err.replace(84);
+        EXPECT_EQ(err.unwrap(), 84);
+        EXPECT_TRUE(opt.is_none());
+    }
+}
