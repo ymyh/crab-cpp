@@ -214,7 +214,7 @@ struct Option<T> : std::variant<None, T>
         if (this->is_some() && std::invoke(pred, std::get<1>(*this)))
         {
             T tmp = std::move(std::get<1>(*this));
-            (*this) = None{};
+            *this = None{};
             return tmp;
         }
 

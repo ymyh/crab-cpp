@@ -215,7 +215,7 @@ struct Result : std::variant<T, E>
     }
 
     /**
-     * @brief Replaces the actual value in the option by the value given in parameter
+     * @brief Replaces the Ok value in the result by the value given in parameter, or turn an Err into Ok
      * @param t The new value to store
      * @return The old value if Ok, None otherwise
      */
