@@ -162,3 +162,51 @@ TEST(ResultTest, Replace)
         EXPECT_TRUE(opt.is_none());
     }
 }
+
+TEST(ResultTest, AndThenTypeChange)
+{
+    // Test and_then on Ok changing the value type
+    auto ok = Result<int, std::string>(42);
+    auto changed = ok.and_then([](int x) { return Result<double, std::string>(x * 1.5); });
+    static_assert(std::is_same_v<decltype(changed), Result<double, std::string>>);
+    EXPECT_TRUE(changed.is_ok());
+    EXPECT_DOUBLE_EQ(changed.unwrap(), 63.0);
+
+    // Test and_then on Err propagates the error
+    auto err = Result<int, std::string>("error");
+    auto propagated = err.and_then([](int x) { return Result<double, std::string>(x * 1.5); });
+    EXPECT_TRUE(propagated.is_err());
+    EXPECT_EQ(propagated.unwrap_err(), "error");
+}
+
+TEST(ResultTest, MapTypeChange)
+{
+    // Test map on Ok changing the value type
+    auto ok = Result<int, std::string>(42);
+    auto mapped = ok.map([](int x) { return x * 1.5; });
+    static_assert(std::is_same_v<decltype(mapped), Result<double, std::string>>);
+    EXPECT_TRUE(mapped.is_ok());
+    EXPECT_DOUBLE_EQ(mapped.unwrap(), 63.0);
+
+    // Test map on Err keeps the error
+    auto err = Result<int, std::string>("error");
+    auto mapped_err = err.map([](int x) { return x * 1.5; });
+    EXPECT_TRUE(mapped_err.is_err());
+    EXPECT_EQ(mapped_err.unwrap_err(), "error");
+}
+
+TEST(ResultTest, MapErrTypeChange)
+{
+    // Test map_err on Err changing the error type
+    auto err = Result<int, std::string>("error");
+    auto mapped = err.map_err([](const std::string& e) { return static_cast<double>(e.size()); });
+    static_assert(std::is_same_v<decltype(mapped), Result<int, double>>);
+    EXPECT_TRUE(mapped.is_err());
+    EXPECT_DOUBLE_EQ(mapped.unwrap_err(), 5.0);
+
+    // Test map_err on Ok keeps the value
+    auto ok = Result<int, std::string>(42);
+    auto mapped_ok = ok.map_err([](const std::string& e) { return static_cast<double>(e.size()); });
+    EXPECT_TRUE(mapped_ok.is_ok());
+    EXPECT_EQ(mapped_ok.unwrap(), 42);
+}

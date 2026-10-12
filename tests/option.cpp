@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+import std;
 import crab_cpp;
 
 using namespace crab_cpp;
@@ -175,6 +176,7 @@ TEST(OptionTest, Take)
 
         // Test take on None (should panic)
         auto none = Option<int&>(None{});
+        EXPECT_DEATH(none.take(), "Panic encountered: Calling Option<T>::take\\(\\) on a None value");
     }
 }
 
@@ -333,5 +335,244 @@ TEST(OptionTest, Inspect)
         none.inspect([&value](int x) { value = x; });
         EXPECT_EQ(value, 0);
         EXPECT_TRUE(none.is_none());
+    }
+}
+
+TEST(OptionTest, And)
+{
+    {
+        // Test and_ on Some
+        auto some = Option<int>(42);
+        auto other = Option<double>(3.14);
+        auto kept = some.and_(other);
+        EXPECT_TRUE(kept.is_some());
+        EXPECT_DOUBLE_EQ(kept.unwrap(), 3.14);
+
+        // Test and_ on None
+        auto none = Option<int>(None{});
+        auto result = none.and_(other);
+        EXPECT_TRUE(result.is_none());
+    }
+
+    {
+        // Test and_ on Some with pointer
+        int num = 42;
+        double pi = 3.14;
+        auto some = Option<int*>(&num);
+        auto other = Option<double*>(&pi);
+        auto kept = some.and_(other);
+        EXPECT_TRUE(kept.is_some());
+        EXPECT_EQ(kept.unwrap(), &pi);
+
+        // Test and_ on None with pointer
+        auto none = Option<int*>(None{});
+        auto result = none.and_(other);
+        EXPECT_TRUE(result.is_none());
+    }
+
+    {
+        // Test and_ on Some with reference
+        int num = 42;
+        double pi = 3.14;
+        auto some = Option<int&>(num);
+        auto other = Option<double&>(pi);
+        auto kept = some.and_(other);
+        EXPECT_TRUE(kept.is_some());
+        EXPECT_DOUBLE_EQ(kept.unwrap(), 3.14);
+
+        // Test and_ on None with reference
+        auto none = Option<int&>(None{});
+        auto result = none.and_(other);
+        EXPECT_TRUE(result.is_none());
+    }
+}
+
+TEST(OptionTest, Expect)
+{
+    {
+        // Test expect on Some
+        auto some = Option<int>(42);
+        EXPECT_EQ(some.expect("should not panic"), 42);
+
+        // Test expect on None (should panic)
+        auto none = Option<int>(None{});
+        EXPECT_DEATH(none.expect("custom message"), "Panic encountered: custom message");
+    }
+
+    {
+        // Test expect on Some with pointer
+        int num = 42;
+        auto some = Option<int*>(&num);
+        EXPECT_EQ(some.expect("should not panic"), &num);
+
+        // Test expect on None with pointer (should panic)
+        auto none = Option<int*>(None{});
+        EXPECT_DEATH(none.expect("custom message"), "Panic encountered: custom message");
+    }
+
+    {
+        // Test expect on Some with reference
+        int num = 42;
+        auto some = Option<int&>(num);
+        EXPECT_EQ(some.expect("should not panic"), 42);
+
+        // Test expect on None with reference (should panic)
+        auto none = Option<int&>(None{});
+        EXPECT_DEATH(none.expect("custom message"), "Panic encountered: custom message");
+    }
+}
+
+TEST(OptionTest, ExpectTake)
+{
+    {
+        // Test expect_take on Some
+        auto some = Option<int>(42);
+        EXPECT_EQ(some.expect_take("should not panic"), 42);
+        EXPECT_TRUE(some.is_none());
+
+        // Test expect_take on None (should panic)
+        auto none = Option<int>(None{});
+        EXPECT_DEATH(none.expect_take("custom message"), "Panic encountered: custom message");
+    }
+
+    {
+        // Test expect_take on Some with pointer
+        int num = 42;
+        auto some = Option<int*>(&num);
+        EXPECT_EQ(some.expect_take("should not panic"), &num);
+        EXPECT_TRUE(some.is_none());
+
+        // Test expect_take on None with pointer (should panic)
+        auto none = Option<int*>(None{});
+        EXPECT_DEATH(none.expect_take("custom message"), "Panic encountered: custom message");
+    }
+
+    {
+        // Test expect_take on Some with reference
+        int num = 42;
+        auto some = Option<int&>(num);
+        EXPECT_EQ(some.expect_take("should not panic"), 42);
+        EXPECT_TRUE(some.is_none());
+
+        // Test expect_take on None with reference (should panic)
+        auto none = Option<int&>(None{});
+        EXPECT_DEATH(none.expect_take("custom message"), "Panic encountered: custom message");
+    }
+}
+
+TEST(OptionTest, MapOrElse)
+{
+    // Test map_or_else on Some
+    auto some = Option<int>(42);
+    auto mapped = some.map_or_else([]() { return 7; }, [](int x) { return x * 2; });
+    EXPECT_EQ(mapped, 84);
+
+    // Test map_or_else on None
+    auto none = Option<int>(None{});
+    auto defaulted = none.map_or_else([]() { return 7; }, [](int x) { return x * 2; });
+    EXPECT_EQ(defaulted, 7);
+}
+
+TEST(OptionTest, Or)
+{
+    {
+        // Test or_ on Some
+        auto some = Option<int>(42);
+        auto other = Option<int>(7);
+        EXPECT_EQ(some.or_(other).unwrap(), 42);
+
+        // Test or_ on None
+        auto none = Option<int>(None{});
+        EXPECT_EQ(none.or_(other).unwrap(), 7);
+    }
+
+    {
+        // Test or_ on Some with pointer
+        int a = 1;
+        int b = 2;
+        auto some = Option<int*>(&a);
+        auto other = Option<int*>(&b);
+        EXPECT_EQ(some.or_(other).unwrap(), &a);
+
+        // Test or_ on None with pointer
+        auto none = Option<int*>(None{});
+        EXPECT_EQ(none.or_(other).unwrap(), &b);
+    }
+
+    {
+        // Test or_ on Some with reference
+        int a = 1;
+        int b = 2;
+        auto some = Option<int&>(a);
+        auto other = Option<int&>(b);
+        EXPECT_EQ(some.or_(other).unwrap(), 1);
+
+        // Test or_ on None with reference
+        auto none = Option<int&>(None{});
+        EXPECT_EQ(none.or_(other).unwrap(), 2);
+    }
+}
+
+TEST(OptionTest, UnwrapUnchecked)
+{
+    {
+        // Unchecked access skips the None check entirely.
+        auto some = Option<int>(42);
+        EXPECT_EQ(some.unwrap_unchecked(), 42);
+    }
+
+    {
+        int num = 42;
+        auto some = Option<int*>(&num);
+        EXPECT_EQ(some.unwrap_unchecked(), &num);
+    }
+
+    {
+        int num = 42;
+        auto some = Option<int&>(num);
+        EXPECT_EQ(some.unwrap_unchecked(), 42);
+    }
+}
+
+TEST(OptionTest, Unzip)
+{
+    {
+        // Some((a, b)) -> (Some(a), Some(b))
+        auto some = Option<std::pair<int, std::string>>{ std::pair<int, std::string>{ 42, "hello" } };
+
+        auto unzipped = some.unzip();
+        static_assert(std::is_same_v<decltype(unzipped), std::tuple<Option<int>, Option<std::string>>>);
+
+        EXPECT_TRUE(std::get<0>(unzipped).is_some());
+        EXPECT_EQ(std::get<0>(unzipped).unwrap(), 42);
+        EXPECT_TRUE(std::get<1>(unzipped).is_some());
+        EXPECT_EQ(std::get<1>(unzipped).unwrap(), "hello");
+
+        // The source option is emptied.
+        EXPECT_TRUE(some.is_none());
+    }
+
+    {
+        // None -> (None, None)
+        auto none = Option<std::tuple<int, double>>{ None{} };
+
+        auto unzipped = none.unzip();
+        EXPECT_TRUE(std::get<0>(unzipped).is_none());
+        EXPECT_TRUE(std::get<1>(unzipped).is_none());
+    }
+
+    {
+        // Reference elements are preserved by reference.
+        int a = 1;
+        double b = 2.5;
+        auto some = Option<std::pair<int&, double&>>{ std::pair<int&, double&>{ a, b } };
+
+        auto unzipped = some.unzip();
+        EXPECT_EQ(std::get<0>(unzipped).unwrap(), 1);
+        EXPECT_DOUBLE_EQ(std::get<1>(unzipped).unwrap(), 2.5);
+
+        // Mutating through an unzipped reference affects the original object.
+        std::get<0>(unzipped).unwrap() = 10;
+        EXPECT_EQ(a, 10);
     }
 }

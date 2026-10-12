@@ -218,7 +218,7 @@ To enable this sub-module, define the `CRAB_CPP_ENABLE_STRING` macro.
 
 These three types represent simplified counterparts of Rust's `char`, `&str`, and `String`. `String` is ends with null-terminated to ensure better interoperability with C/C++ APIs. Using the `from` static member function to construct `str` or `String` instead of constructors, unless you need a empty one.
 
-We've implemented `std::formatter` support and `operator<<` for printing, although output will stop at the first null terminator. Note that String is an alias for `crab_cpp::raw::String<std::allocator<std::byte>>`, use the raw version for custom allocators. UTF-8 handling is powered by utf8proc, supporting up to Unicode 16.
+We've implemented `std::formatter` support and `operator<<` for printing, although output will stop at the first null terminator. Note that String is an alias for `crab_cpp::raw::String<std::allocator<std::byte>>`, use the raw version for custom allocators. UTF-8 handling is powered by utf8proc, supporting up to Unicode 18.
 
 While core functionality is implemented, many methods remain unimplemented. Contributions are welcome!
 
@@ -244,6 +244,25 @@ int main()
     // `join_with` inside namespace `strings` are wrappers of std::views::join_with
     ss = s.split(",") | strings::join_with("\n") | std::ranges::to<String>();
     assert(ss == "Hello\n World!");
+
+    using namespace literal;
+
+    // The whole Rust split family is available, forwards and in reverse:
+    // split/rsplit, splitn/rsplitn, split_terminator/rsplit_terminator,
+    // split_inclusive/rsplit_inclusive and (Unicode) split_whitespace.
+    auto pieces = "a,b,".split_inclusive(',') | std::ranges::to<std::vector<str>>();
+    assert(pieces.size() == 2); // ["a,", "b,"]
+
+    // match_indices/rmatch_indices yield `(byte index, match)` pairs.
+    for (auto [index, matched] : "a中b中".match_indices(Char(0x4E2D)))
+    {
+        assert(matched == "中");
+    }
+
+    // Unicode-aware trimming, case conversion and escaping.
+    assert("\u00A0hi\u3000".trim() == "hi");  // NBSP and U+3000 are whitespace
+    assert("ß".to_uppercase() == "ẞ");         // utf8proc simple 1:1 mapping
+    assert("a\tb".escape_debug() == "a\\tb");
 }
 ```
 

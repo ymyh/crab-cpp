@@ -43,6 +43,7 @@ struct plain_str
     const std::byte* data = nullptr;
     size_t len = 0;
 
+public:
     explicit constexpr plain_str() noexcept = default;
 
     constexpr plain_str(const plain_str&) = default;
@@ -301,6 +302,109 @@ public:
                (this->m_value >= static_cast<std::uint32_t>('a') && this->m_value <= static_cast<std::uint32_t>('f'));
     }
 
+    /**
+     * @details Checks if the value is whitespace as defined by the Unicode White_Space property:
+     *          U+0009..U+000D (TAB, LF, VT, FF, CR), U+0020 SPACE, U+0085 NEXT LINE, and the
+     *          Zs/Zl/Zp categories.
+     * @return true if this char is whitespace
+     */
+    [[nodiscard]] constexpr auto is_whitespace() const noexcept -> bool
+    {
+        // U+000B VERTICAL TAB is White_Space but is deliberately excluded from
+        // the narrower ASCII notion (`is_ascii_whitespace`), so it is called out
+        // explicitly to match Rust's `char::is_whitespace`.
+        if (this->m_value == 0x0B || this->is_ascii_whitespace() || this->m_value == 0x85)
+        {
+            return true;
+        }
+
+        const auto category = utf8proc_category(static_cast<utf8proc_int32_t>(this->m_value));
+
+        return category == UTF8PROC_CATEGORY_ZS || category == UTF8PROC_CATEGORY_ZL || category == UTF8PROC_CATEGORY_ZP;
+    }
+
+    /**
+     * @brief Returns the number of bytes of this char when encoded as UTF-8
+     */
+    [[nodiscard]] constexpr auto len_utf8() const noexcept -> size_t
+    {
+        if (this->m_value <= 0x7F)
+        {
+            return 1;
+        }
+
+        if (this->m_value <= 0x7FF)
+        {
+            return 2;
+        }
+
+        if (this->m_value <= 0xFFFF)
+        {
+            return 3;
+        }
+
+        return 4;
+    }
+
+    /**
+     * @brief Encodes this char as UTF-8 into the given buffer
+     * @param out A buffer of at least 4 bytes
+     * @return The number of bytes written
+     */
+    [[nodiscard]] constexpr auto encode_utf8(std::span<std::byte, 4> out) const noexcept -> size_t
+    {
+        utf8proc_uint8_t encoded[4];
+        const auto len = utf8proc_encode_char(static_cast<utf8proc_int32_t>(this->m_value), encoded);
+
+        for (size_t i = 0; i < static_cast<size_t>(len); i += 1)
+        {
+            out[i] = static_cast<std::byte>(encoded[i]);
+        }
+
+        return static_cast<size_t>(len);
+    }
+
+    /**
+     * @brief Returns the ASCII lowercase equivalent of this char
+     * @note Non-ASCII characters are returned unchanged
+     */
+    [[nodiscard]] constexpr auto to_ascii_lowercase() const noexcept -> Char
+    {
+        if (this->is_ascii_uppercase())
+        {
+            return Char::from_u32_unchecked(this->m_value + 0x20);
+        }
+
+        return Char::from_u32_unchecked(this->m_value);
+    }
+
+    /**
+     * @brief Returns the ASCII uppercase equivalent of this char
+     * @note Non-ASCII characters are returned unchanged
+     */
+    [[nodiscard]] constexpr auto to_ascii_uppercase() const noexcept -> Char
+    {
+        if (this->is_ascii_lowercase())
+        {
+            return Char::from_u32_unchecked(this->m_value - 0x20);
+        }
+
+        return Char::from_u32_unchecked(this->m_value);
+    }
+
+    /**
+     * @brief Constructs a Char from a Unicode scalar value without validating it
+     * @param value The Unicode scalar value
+     * @warning This function is unsafe and may cause undefined behavior if value is not a valid scalar value
+     */
+    [[nodiscard]] static constexpr auto from_u32_unchecked(std::uint32_t value) noexcept -> Char
+    {
+        Char ch;
+        ch.m_value = value;
+
+        return ch;
+    }
+
 // operators
 public:
     constexpr auto operator==(const Char& other) const noexcept -> bool = default;
@@ -326,6 +430,258 @@ private:
      * @brief Private constructor for internal use
      */
     constexpr str(pointer data, size_t len) noexcept : m_data(data), m_len(len) {}
+
+    /**
+     * @brief Encodes a Char into the given buffer and returns a str borrowing it
+     * @param ch The character to encode
+     * @param buffer A buffer of at least 4 bytes, which must outlive the returned str
+     * @return A str borrowing the buffer
+     */
+    [[nodiscard]] static constexpr auto char_pattern(Char ch, std::byte (&buffer)[4]) noexcept -> str
+    {
+        const auto len = ch.encode_utf8(buffer);
+
+        return str(buffer, len);
+    }
+
+    /**
+     * @brief Checks whether a byte is ASCII whitespace
+     */
+    [[nodiscard]] static constexpr auto is_ascii_whitespace_byte(std::byte byte) noexcept -> bool
+    {
+        const auto value = static_cast<std::uint32_t>(static_cast<std::uint8_t>(byte));
+
+        return Char::from_u32_unchecked(value).is_ascii_whitespace();
+    }
+
+    /**
+     * @brief Returns the length in bytes of the UTF-8 sequence introduced by `byte`
+     * @param byte The leading byte of a UTF-8 sequence
+     * @return 1, 2, 3 or 4
+     */
+    [[nodiscard]] static constexpr auto utf8_sequence_len(std::byte byte) noexcept -> size_t
+    {
+        const auto value = static_cast<std::uint8_t>(byte);
+
+        if ((value & 0x80) == 0x00)
+        {
+            return 1;
+        }
+
+        if ((value & 0xE0) == 0xC0)
+        {
+            return 2;
+        }
+
+        if ((value & 0xF0) == 0xE0)
+        {
+            return 3;
+        }
+
+        return 4;
+    }
+
+    /**
+     * @brief Returns the index of the code point boundary strictly before `index`
+     * @param index A code point boundary of this string, greater than zero
+     */
+    [[nodiscard]] constexpr auto previous_boundary(size_t index) const noexcept -> size_t
+    {
+        size_t i = index - 1;
+        while (i > 0 && (static_cast<std::uint8_t>(this->m_data[i]) & 0xC0) == 0x80)
+        {
+            i -= 1;
+        }
+
+        return i;
+    }
+
+    /**
+     * @brief Decodes the character starting at the given boundary
+     * @param index A code point boundary of this string
+     * @return The decoded character and its encoded length in bytes
+     */
+    [[nodiscard]] constexpr auto decode_at(size_t index) const noexcept -> std::pair<Char, size_t>
+    {
+        utf8proc_int32_t codepoint = 0;
+        const auto advance = utf8proc_iterate(
+            reinterpret_cast<const utf8proc_uint8_t*>(this->m_data + index),
+            this->m_len - index,
+            &codepoint
+        );
+
+        return std::pair<Char, size_t>{
+            Char::from_u32_unchecked(static_cast<std::uint32_t>(codepoint)),
+            static_cast<size_t>(advance)
+        };
+    }
+
+    /**
+     * @brief Checks whether a character is printable for the purpose of `escape_debug`
+     * @details Printable ASCII and non-ASCII characters whose category is not a control,
+     *          format, surrogate, private-use, unassigned or separator category are kept.
+     */
+    [[nodiscard]] static auto is_printable(Char ch) noexcept -> bool
+    {
+        const auto value = ch.code_point();
+
+        if (value >= 0x20 && value <= 0x7E)
+        {
+            return true;
+        }
+
+        if (value < 0x80)
+        {
+            return false;
+        }
+
+        switch (utf8proc_category(static_cast<utf8proc_int32_t>(value)))
+        {
+        case UTF8PROC_CATEGORY_CC:
+        case UTF8PROC_CATEGORY_CF:
+        case UTF8PROC_CATEGORY_CS:
+        case UTF8PROC_CATEGORY_CO:
+        case UTF8PROC_CATEGORY_CN:
+        case UTF8PROC_CATEGORY_ZS:
+        case UTF8PROC_CATEGORY_ZL:
+        case UTF8PROC_CATEGORY_ZP:
+            return false;
+        default:
+            return true;
+        }
+    }
+
+    /**
+     * @brief Appends a lowercase `\u{...}` escape for a scalar value to a String
+     */
+    template<typename Alloc>
+    static auto push_unicode_escape(raw::String<Alloc>& out, std::uint32_t value) -> void
+    {
+        constexpr char digits[] = "0123456789abcdef";
+
+        out.push(Char('\\'));
+        out.push(Char('u'));
+        out.push(Char('{'));
+
+        char buffer[8] = {};
+        size_t count = 0;
+
+        do
+        {
+            buffer[count] = digits[value & 0xF];
+            value >>= 4;
+            count += 1;
+        } while (value != 0);
+
+        for (size_t i = count; i > 0; i -= 1)
+        {
+            out.push(Char(buffer[i - 1]));
+        }
+
+        out.push(Char('}'));
+    }
+
+    /**
+     * @brief Appends the `escape_default` form of `ch` to a String
+     */
+    template<typename Alloc>
+    static auto append_escape_default(raw::String<Alloc>& out, Char ch) -> void
+    {
+        const auto value = ch.code_point();
+
+        if (value == '\t')
+        {
+            out.push(Char('\\'));
+            out.push(Char('t'));
+        }
+        else if (value == '\r')
+        {
+            out.push(Char('\\'));
+            out.push(Char('r'));
+        }
+        else if (value == '\n')
+        {
+            out.push(Char('\\'));
+            out.push(Char('n'));
+        }
+        else if (value == '\\')
+        {
+            out.push(Char('\\'));
+            out.push(Char('\\'));
+        }
+        else if (value == '\'')
+        {
+            out.push(Char('\\'));
+            out.push(Char('\''));
+        }
+        else if (value == '"')
+        {
+            out.push(Char('\\'));
+            out.push(Char('"'));
+        }
+        else if (value >= 0x20 && value <= 0x7E)
+        {
+            out.push(ch);
+        }
+        else
+        {
+            str::push_unicode_escape(out, value);
+        }
+    }
+
+    /**
+     * @brief Appends the `escape_debug` form of `ch` to a String
+     * @note Grapheme-extended handling is intentionally not implemented yet (see design P3).
+     */
+    template<typename Alloc>
+    static auto append_escape_debug(raw::String<Alloc>& out, Char ch) -> void
+    {
+        const auto value = ch.code_point();
+
+        if (value == 0x00)
+        {
+            out.push(Char('\\'));
+            out.push(Char('0'));
+        }
+        else if (value == '\t')
+        {
+            out.push(Char('\\'));
+            out.push(Char('t'));
+        }
+        else if (value == '\r')
+        {
+            out.push(Char('\\'));
+            out.push(Char('r'));
+        }
+        else if (value == '\n')
+        {
+            out.push(Char('\\'));
+            out.push(Char('n'));
+        }
+        else if (value == '\\')
+        {
+            out.push(Char('\\'));
+            out.push(Char('\\'));
+        }
+        else if (value == '\'')
+        {
+            out.push(Char('\\'));
+            out.push(Char('\''));
+        }
+        else if (value == '"')
+        {
+            out.push(Char('\\'));
+            out.push(Char('"'));
+        }
+        else if (str::is_printable(ch))
+        {
+            out.push(ch);
+        }
+        else
+        {
+            str::push_unicode_escape(out, value);
+        }
+    }
 
 public:
     /**
@@ -420,19 +776,15 @@ public:
     }
 
     /**
-     * @brief Returns C-style string of this str's contents
-     * @return A span containing the string's bytes
+     * @brief Returns a pointer to this str's contents as a `const char*`
+     * @return A pointer to the string's bytes
+     * @note The returned pointer is **not** guaranteed to be NUL-terminated.
+     *       For a sub-slice it points into the middle of the backing buffer,
+     *       so reading it as a C string would run past the end of the slice.
+     *       Use `raw::String::c_str()` when a NUL-terminated C string is
+     *       required, or `to_std_string()` to obtain an owned copy.
      */
     [[nodiscard]] constexpr auto as_raw() const noexcept -> const char*
-    {
-        return std::bit_cast<const char*>(this->m_data);
-    }
-
-    /**
-     * @brief Returns a C-style string of this str's contents
-     * @return A C-style string of this str's contents
-     */
-    [[nodiscard]] constexpr auto c_str() const noexcept -> const char*
     {
         return std::bit_cast<const char*>(this->m_data);
     }
@@ -461,6 +813,50 @@ public:
         // Use std::ranges::search to find the pattern
         auto result = std::ranges::search(haystack, needle);
         return !result.empty();
+    }
+
+    /**
+     * @brief Checks if this string contains the given pattern
+     * @param pattern The pattern to search for
+     * @return true if this string contains the pattern
+     * @note Panics if the pattern is not a valid UTF-8 sequence
+     */
+    [[nodiscard]] constexpr auto contains(const char* pattern) const noexcept -> bool
+    {
+        return this->contains(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::contains#pattern"));
+    }
+
+    /**
+     * @brief Checks if this string contains the given pattern
+     * @param pattern The pattern to search for
+     * @return true if this string contains the pattern
+     */
+    template<typename Alloc>
+    [[nodiscard]] constexpr auto contains(const raw::String<Alloc>& pattern) const noexcept -> bool
+    {
+        return this->contains(pattern.as_str());
+    }
+
+    /**
+     * @brief Checks if this string contains the given character
+     * @param ch The character to search for
+     * @return true if this string contains the character
+     */
+    [[nodiscard]] constexpr auto contains(Char ch) const noexcept -> bool
+    {
+        std::byte buffer[4];
+
+        return this->contains(str::char_pattern(ch, buffer));
+    }
+
+    /**
+     * @brief Checks if this string contains the given character
+     * @param ch The character to search for, interpreted as its numeric value in `[0, 255]`
+     * @return true if this string contains the character
+     */
+    [[nodiscard]] constexpr auto contains(char ch) const noexcept -> bool
+    {
+        return this->contains(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
     }
 
     /**
@@ -562,15 +958,16 @@ public:
 
     /**
      * @brief Returns a sub str of the given range
-     * @param from the sub str beginning index
-     * @param to the sub str ending index (inclusive)
+     * @param from the sub str beginning index (inclusive)
+     * @param to the sub str ending index (exclusive)
      * @note Panics
-        - If `from` or `to` exceeded str's length
-        - If `to` is greater than `from`
+        - If `from` or `to` exceeds str's length
+        - If `from` is greater than `to`
+        - If the resulting range is not on a UTF-8 code point boundary
      */
     [[nodiscard]] constexpr auto slice(size_t from, size_t to) const noexcept -> str
     {
-        if (from > this->m_len || to > this->m_len || std::min(from, to) > this->m_len)
+        if (from > to || to > this->m_len)
         {
             panic("Invalid parameter(s) while calling str::slice, from: {}, to: {}, size: {}", from, to, this->m_len);
         }
@@ -594,6 +991,97 @@ public:
     }
 
     /**
+     * @brief Returns true if the given byte index is a UTF-8 code point boundary
+     * @param index The byte index to check
+     * @return true if `index` is in `[0, size]` and lies on a code point boundary
+     */
+    [[nodiscard]] constexpr auto is_char_boundary(size_t index) const noexcept -> bool
+    {
+        if (index == 0 || index == this->m_len)
+        {
+            return true;
+        }
+
+        if (index > this->m_len)
+        {
+            return false;
+        }
+
+        return (this->m_data[index] & std::byte{0xC0}) != std::byte{0x80};
+    }
+
+    /**
+     * @brief Returns a sub str of the given range, without panicking
+     * @param from the sub str beginning index
+     * @param to the sub str ending index (exclusive)
+     * @return Some containing the sub str, or None if the range is out of bounds or does not lie
+     *         on code point boundaries
+     */
+    [[nodiscard]] constexpr auto get(size_t from, size_t to) const noexcept -> Option<str>
+    {
+        if (from > to || to > this->m_len)
+        {
+            return None{};
+        }
+
+        if (!this->is_char_boundary(from) || !this->is_char_boundary(to))
+        {
+            return None{};
+        }
+
+        return str(this->m_data + from, to - from);
+    }
+
+    /**
+     * @brief Returns a sub str from the given index to the end, without panicking
+     * @param from the sub str beginning index
+     * @return Some containing the sub str, or None if the index is out of bounds or does not lie
+     *         on a code point boundary
+     */
+    [[nodiscard]] constexpr auto get(size_t from) const noexcept -> Option<str>
+    {
+        return this->get(from, this->m_len);
+    }
+
+    /**
+     * @brief Divides the string into two at the given byte index
+     * @param mid The byte index at which to split
+     * @return A pair of the sub str before and the sub str starting at `mid`
+     * @note Panics if mid is out of bounds or not on a UTF-8 code point boundary
+     */
+    [[nodiscard]] constexpr auto split_at(size_t mid) const -> std::pair<str, str>
+    {
+        if (!this->is_char_boundary(mid))
+        {
+            panic("Invalid index while calling str::split_at, mid: {}, size: {}", mid, this->m_len);
+        }
+
+        return std::pair<str, str>{
+            str(this->m_data, mid),
+            str(this->m_data + mid, this->m_len - mid)
+        };
+    }
+
+    /**
+     * @brief Divides the string into two at the given byte index, without panicking
+     * @param mid The byte index at which to split
+     * @return Some containing the pair of sub strs, or None if mid is out of bounds or not on a
+     *         UTF-8 code point boundary
+     */
+    [[nodiscard]] constexpr auto split_at_checked(size_t mid) const noexcept -> Option<std::pair<str, str>>
+    {
+        if (!this->is_char_boundary(mid))
+        {
+            return None{};
+        }
+
+        return std::pair<str, str>{
+            str(this->m_data, mid),
+            str(this->m_data + mid, this->m_len - mid)
+        };
+    }
+
+    /**
      * @brief Checks if this string starts with the given pattern
      * @param pattern The pattern to check for
      * @return true if this string starts with the pattern
@@ -611,6 +1099,50 @@ public:
         }
 
         return std::equal(this->m_data, this->m_data + pattern.m_len, pattern.m_data);
+    }
+
+    /**
+     * @brief Checks if this string starts with the given pattern
+     * @param pattern The pattern to check for
+     * @return true if this string starts with the pattern
+     * @note Panics if the pattern is not a valid UTF-8 sequence
+     */
+    [[nodiscard]] constexpr auto starts_with(const char* pattern) const noexcept -> bool
+    {
+        return this->starts_with(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::starts_with#pattern"));
+    }
+
+    /**
+     * @brief Checks if this string starts with the given pattern
+     * @param pattern The pattern to check for
+     * @return true if this string starts with the pattern
+     */
+    template<typename Alloc>
+    [[nodiscard]] constexpr auto starts_with(const raw::String<Alloc>& pattern) const noexcept -> bool
+    {
+        return this->starts_with(pattern.as_str());
+    }
+
+    /**
+     * @brief Checks if this string starts with the given character
+     * @param ch The character to check for
+     * @return true if this string starts with the character
+     */
+    [[nodiscard]] constexpr auto starts_with(Char ch) const noexcept -> bool
+    {
+        std::byte buffer[4];
+
+        return this->starts_with(str::char_pattern(ch, buffer));
+    }
+
+    /**
+     * @brief Checks if this string starts with the given character
+     * @param ch The character to check for, interpreted as its numeric value in `[0, 255]`
+     * @return true if this string starts with the character
+     */
+    [[nodiscard]] constexpr auto starts_with(char ch) const noexcept -> bool
+    {
+        return this->starts_with(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
     }
 
     /**
@@ -638,6 +1170,50 @@ public:
     }
 
     /**
+     * @brief Checks if this string ends with the given pattern
+     * @param pattern The pattern to check for
+     * @return true if this string ends with the pattern
+     * @note Panics if the pattern is not a valid UTF-8 sequence
+     */
+    [[nodiscard]] constexpr auto ends_with(const char* pattern) const noexcept -> bool
+    {
+        return this->ends_with(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::ends_with#pattern"));
+    }
+
+    /**
+     * @brief Checks if this string ends with the given pattern
+     * @param pattern The pattern to check for
+     * @return true if this string ends with the pattern
+     */
+    template<typename Alloc>
+    [[nodiscard]] constexpr auto ends_with(const raw::String<Alloc>& pattern) const noexcept -> bool
+    {
+        return this->ends_with(pattern.as_str());
+    }
+
+    /**
+     * @brief Checks if this string ends with the given character
+     * @param ch The character to check for
+     * @return true if this string ends with the character
+     */
+    [[nodiscard]] constexpr auto ends_with(Char ch) const noexcept -> bool
+    {
+        std::byte buffer[4];
+
+        return this->ends_with(str::char_pattern(ch, buffer));
+    }
+
+    /**
+     * @brief Checks if this string ends with the given character
+     * @param ch The character to check for, interpreted as its numeric value in `[0, 255]`
+     * @return true if this string ends with the character
+     */
+    [[nodiscard]] constexpr auto ends_with(char ch) const noexcept -> bool
+    {
+        return this->ends_with(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
+    }
+
+    /**
      * @brief Converts the String to a std::string
      * @return A std::string containing the String's contents
      */
@@ -647,13 +1223,31 @@ public:
     }
 
     /**
+     * @brief Creates an owned String from this str
+     * @tparam Alloc The allocator to use for the returned String
+     * @return A new String containing this str's contents
+     * @note Named `to_string` (not Rust's `to_owned`): in C++ the idiomatic
+     *       spelling for "produce the owning type" is `to_string`.
+     */
+    template<typename Alloc = std::allocator<std::byte>>
+    [[nodiscard]] constexpr auto to_string() const -> raw::String<Alloc>
+    {
+        return raw::String<Alloc>(*this);
+    }
+
+    /**
      * @brief Returns the byte index of the first character that matches the pattern
      * @param pattern The pattern to search for
      * @return Option containing the byte index of the first match, or None if not found
      */
     [[nodiscard]] constexpr auto find(const str& pattern) const noexcept -> Option<size_t>
     {
-        if (pattern.m_len > this->m_len || pattern.m_len == 0)
+        if (pattern.m_len == 0)
+        {
+            return size_t(0);
+        }
+
+        if (pattern.m_len > this->m_len)
         {
             return None{};
         }
@@ -682,6 +1276,39 @@ public:
     [[nodiscard]] constexpr auto find(const char* pattern) const noexcept -> Option<size_t>
     {
         return this->find(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::find#pattern"));
+    }
+
+    /**
+     * @brief Returns the byte index of the first character that matches the pattern
+     * @param pattern The pattern to search for
+     * @return Option containing the byte index of the first match, or None if not found
+     */
+    template<typename Alloc>
+    [[nodiscard]] constexpr auto find(const raw::String<Alloc>& pattern) const noexcept -> Option<size_t>
+    {
+        return this->find(pattern.as_str());
+    }
+
+    /**
+     * @brief Returns the byte index of the first occurrence of the given character
+     * @param ch The character to search for
+     * @return Option containing the byte index of the first match, or None if not found
+     */
+    [[nodiscard]] constexpr auto find(Char ch) const noexcept -> Option<size_t>
+    {
+        std::byte buffer[4];
+
+        return this->find(str::char_pattern(ch, buffer));
+    }
+
+    /**
+     * @brief Returns the byte index of the first occurrence of the given character
+     * @param ch The character to search for, interpreted as its numeric value in `[0, 255]`
+     * @return Option containing the byte index of the first match, or None if not found
+     */
+    [[nodiscard]] constexpr auto find(char ch) const noexcept -> Option<size_t>
+    {
+        return this->find(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
     }
 
     /**
@@ -833,7 +1460,12 @@ public:
      */
     [[nodiscard]] constexpr auto rfind(const str& pattern) const noexcept -> Option<size_t>
     {
-        if (pattern.m_len > this->m_len || pattern.m_len == 0)
+        if (pattern.m_len == 0)
+        {
+            return this->m_len;
+        }
+
+        if (pattern.m_len > this->m_len)
         {
             return None{};
         }
@@ -859,6 +1491,39 @@ public:
     [[nodiscard]] constexpr auto rfind(const char* pattern) const noexcept -> Option<size_t>
     {
         return this->rfind(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::rfind#pattern"));
+    }
+
+    /**
+     * @brief Returns the byte index for the first character of the last match of the pattern in this str slice.
+     * @param pattern The pattern to search for
+     * @returns `None` if the pattern doesn’t match.
+     */
+    template<typename Alloc>
+    [[nodiscard]] constexpr auto rfind(const raw::String<Alloc>& pattern) const noexcept -> Option<size_t>
+    {
+        return this->rfind(pattern.as_str());
+    }
+
+    /**
+     * @brief Returns the byte index of the last occurrence of the given character
+     * @param ch The character to search for
+     * @return Option containing the byte index of the last match, or None if not found
+     */
+    [[nodiscard]] constexpr auto rfind(Char ch) const noexcept -> Option<size_t>
+    {
+        std::byte buffer[4];
+
+        return this->rfind(str::char_pattern(ch, buffer));
+    }
+
+    /**
+     * @brief Returns the byte index of the last occurrence of the given character
+     * @param ch The character to search for, interpreted as its numeric value in `[0, 255]`
+     * @return Option containing the byte index of the last match, or None if not found
+     */
+    [[nodiscard]] constexpr auto rfind(char ch) const noexcept -> Option<size_t>
+    {
+        return this->rfind(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
     }
 
     /**
@@ -902,6 +1567,39 @@ public:
     }
 
     /**
+     * @brief If the string starts with the pattern prefix, returns the substring after the prefix, wrapped in Some.
+     * This method removes the prefix exactly once.
+     * @returns A string slice with the prefix removed, if the string does not start with prefix, returns None.
+     */
+    template<typename Alloc>
+    [[nodiscard]] auto strip_prefix(const raw::String<Alloc>& pattern) const noexcept -> Option<str>
+    {
+        return this->strip_prefix(pattern.as_str());
+    }
+
+    /**
+     * @brief If the string starts with the given character, returns the substring after it, wrapped in Some.
+     * @param ch The character to strip
+     * @returns A str slice with the character removed, or None if the string does not start with it.
+     */
+    [[nodiscard]] auto strip_prefix(Char ch) const noexcept -> Option<str>
+    {
+        std::byte buffer[4];
+
+        return this->strip_prefix(str::char_pattern(ch, buffer));
+    }
+
+    /**
+     * @brief If the string starts with the given character, returns the substring after it, wrapped in Some.
+     * @param ch The character to strip, interpreted as its numeric value in `[0, 255]`
+     * @returns A str slice with the character removed, or None if the string does not start with it.
+     */
+    [[nodiscard]] auto strip_prefix(char ch) const noexcept -> Option<str>
+    {
+        return this->strip_prefix(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
+    }
+
+    /**
      * @brief If the string starts with the pattern suffix, returns the substring before the suffix, wrapped in Some.
      * This method removes the suffix exactly once.
      * @returns A str slice with the prefix removed, if the string does not ends with suffix, returns None.
@@ -909,6 +1607,39 @@ public:
     [[nodiscard]] auto strip_suffix(const char* pattern) const noexcept -> Option<str>
     {
         return this->strip_suffix(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::strip_suffix#pattern"));
+    }
+
+    /**
+     * @brief If the string ends with the pattern suffix, returns the substring before the suffix, wrapped in Some.
+     * This method removes the suffix exactly once.
+     * @returns A str slice with the suffix removed, if the string does not ends with suffix, returns None.
+     */
+    template<typename Alloc>
+    [[nodiscard]] auto strip_suffix(const raw::String<Alloc>& pattern) const noexcept -> Option<str>
+    {
+        return this->strip_suffix(pattern.as_str());
+    }
+
+    /**
+     * @brief If the string ends with the given character, returns the substring before it, wrapped in Some.
+     * @param ch The character to strip
+     * @returns A str slice with the character removed, or None if the string does not end with it.
+     */
+    [[nodiscard]] auto strip_suffix(Char ch) const noexcept -> Option<str>
+    {
+        std::byte buffer[4];
+
+        return this->strip_suffix(str::char_pattern(ch, buffer));
+    }
+
+    /**
+     * @brief If the string ends with the given character, returns the substring before it, wrapped in Some.
+     * @param ch The character to strip, interpreted as its numeric value in `[0, 255]`
+     * @returns A str slice with the character removed, or None if the string does not end with it.
+     */
+    [[nodiscard]] auto strip_suffix(char ch) const noexcept -> Option<str>
+    {
+        return this->strip_suffix(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
     }
 
     /**
@@ -938,6 +1669,111 @@ public:
     }
 
     /**
+     * @brief Returns a new String with all characters converted to lowercase
+     * @tparam Alloc The allocator to use for the returned String
+     * @return A new String with the Unicode simple lowercase mapping applied
+     * @note utf8proc only exposes the simple 1:1 mapping, so full mappings (e.g. the
+     *       Turkish dotted I) are not performed.
+     */
+    template<typename Alloc = std::allocator<std::byte>>
+    [[nodiscard]] auto to_lowercase() const -> raw::String<Alloc>
+    {
+        auto string = raw::String<Alloc>();
+        string.reserve(this->m_len);
+
+        for (const auto ch : this->chars())
+        {
+            const auto mapped = utf8proc_tolower(static_cast<utf8proc_int32_t>(ch.code_point()));
+            string.push(Char::from_u32_unchecked(static_cast<std::uint32_t>(mapped)));
+        }
+
+        return string;
+    }
+
+    /**
+     * @brief Returns a new String with all characters converted to uppercase
+     * @tparam Alloc The allocator to use for the returned String
+     * @return A new String with the Unicode simple uppercase mapping applied
+     * @note utf8proc only exposes the simple 1:1 mapping. Rust performs full mappings, so
+     *       `"ß".to_uppercase()` is "SS" there but U+1E9E here.
+     */
+    template<typename Alloc = std::allocator<std::byte>>
+    [[nodiscard]] auto to_uppercase() const -> raw::String<Alloc>
+    {
+        auto string = raw::String<Alloc>();
+        string.reserve(this->m_len);
+
+        for (const auto ch : this->chars())
+        {
+            const auto mapped = utf8proc_toupper(static_cast<utf8proc_int32_t>(ch.code_point()));
+            string.push(Char::from_u32_unchecked(static_cast<std::uint32_t>(mapped)));
+        }
+
+        return string;
+    }
+
+    /**
+     * @brief Returns a new String containing the escaped form of this string
+     * @tparam Alloc The allocator to use for the returned String
+     * @details Follows Rust's `char::escape_default`: tab, CR, LF, backslash and both quote
+     *          characters are escaped, printable ASCII is kept, everything else becomes a
+     *          `\u{...}` escape.
+     */
+    template<typename Alloc = std::allocator<std::byte>>
+    [[nodiscard]] auto escape_default() const -> raw::String<Alloc>
+    {
+        auto string = raw::String<Alloc>();
+        string.reserve(this->m_len);
+
+        for (const auto ch : this->chars())
+        {
+            str::append_escape_default(string, ch);
+        }
+
+        return string;
+    }
+
+    /**
+     * @brief Returns a new String containing the debug-escaped form of this string
+     * @tparam Alloc The allocator to use for the returned String
+     * @details Like `escape_default`, but NUL becomes `\0` and printable non-ASCII
+     *          characters are kept as-is.
+     */
+    template<typename Alloc = std::allocator<std::byte>>
+    [[nodiscard]] auto escape_debug() const -> raw::String<Alloc>
+    {
+        auto string = raw::String<Alloc>();
+        string.reserve(this->m_len);
+
+        for (const auto ch : this->chars())
+        {
+            str::append_escape_debug(string, ch);
+        }
+
+        return string;
+    }
+
+    /**
+     * @brief Returns a new String containing the Unicode-escaped form of this string
+     * @tparam Alloc The allocator to use for the returned String
+     * @details Every character is written as a `\u{...}` escape, regardless of whether it
+     *          is printable.
+     */
+    template<typename Alloc = std::allocator<std::byte>>
+    [[nodiscard]] auto escape_unicode() const -> raw::String<Alloc>
+    {
+        auto string = raw::String<Alloc>();
+        string.reserve(this->m_len);
+
+        for (const auto ch : this->chars())
+        {
+            str::push_unicode_escape(string, ch.code_point());
+        }
+
+        return string;
+    }
+
+    /**
      * @brief Returns a str with leading and trailing ASCII whitespace removed.
      * ASCII whitespace refers to U+0020 SPACE, U+0009 HORIZONTAL TAB, U+000A LINE FEED, U+000C FORM FEED, or U+000D CARRIAGE RETURN.
      */
@@ -960,7 +1796,7 @@ public:
         size_t i = 0;
         for (; i < this->m_len; i += 1)
         {
-            if (this->m_data[i] != std::byte{0x20})
+            if (!is_ascii_whitespace_byte(this->m_data[i]))
             {
                 break;
             }
@@ -980,16 +1816,66 @@ public:
             return *this;
         }
 
-        size_t i = this->m_len - 1;
-        for (; i >= 0; i -= 1)
+        size_t i = this->m_len;
+        while (i > 0 && is_ascii_whitespace_byte(this->m_data[i - 1]))
         {
-            if (this->m_data[i] != std::byte{0x20})
+            i -= 1;
+        }
+
+        return str(this->m_data, i);
+    }
+
+    /**
+     * @brief Returns a str with leading and trailing Unicode whitespace removed
+     * @details Unicode whitespace is the `White_Space` property, matching Rust. Unlike
+     *          `trim_ascii`, this also strips e.g. U+00A0 and U+3000.
+     */
+    [[nodiscard]] auto trim() const noexcept -> str
+    {
+        return this->trim_start().trim_end();
+    }
+
+    /**
+     * @brief Returns a str with leading Unicode whitespace removed
+     * @see trim() for the definition of whitespace
+     */
+    [[nodiscard]] auto trim_start() const noexcept -> str
+    {
+        size_t i = 0;
+        while (i < this->m_len)
+        {
+            const auto [ch, width] = this->decode_at(i);
+            if (!ch.is_whitespace())
             {
                 break;
             }
+
+            i += width;
         }
 
-        return str(this->m_data, i + 1);
+        return str(this->m_data + i, this->m_len - i);
+    }
+
+    /**
+     * @brief Returns a str with trailing Unicode whitespace removed
+     * @see trim() for the definition of whitespace
+     */
+    [[nodiscard]] auto trim_end() const noexcept -> str
+    {
+        size_t end = 0;
+        size_t i = 0;
+        while (i < this->m_len)
+        {
+            const auto [ch, width] = this->decode_at(i);
+            if (!ch.is_whitespace())
+            {
+                end = i + width;
+            }
+
+            i += width;
+        }
+
+        return str(this->m_data, end);
     }
 
     /**
@@ -1053,8 +1939,536 @@ public:
         return str(curr_data, curr_len);
     }
 
+    /**
+     * @brief Returns a string slice with all prefixes that match a pattern repeatedly removed.
+     * @param pattern The pattern to search for
+     * @note Panics if the pattern is not a valid UTF-8 sequence
+     */
+    [[nodiscard]] auto trim_start_matches(const char* pattern) const noexcept -> str
+    {
+        return this->trim_start_matches(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::trim_start_matches#pattern"));
+    }
+
+    /**
+     * @brief Returns a string slice with all suffixes that match a pattern repeatedly removed.
+     * @param pattern The pattern to search for
+     * @note Panics if the pattern is not a valid UTF-8 sequence
+     */
+    [[nodiscard]] auto trim_end_matches(const char* pattern) const noexcept -> str
+    {
+        return this->trim_end_matches(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::trim_end_matches#pattern"));
+    }
+
+    /**
+     * @brief Returns a string slice with all prefixes that match the pattern repeatedly removed.
+     * @param pattern The pattern to search for
+     */
+    template<typename Alloc>
+    [[nodiscard]] auto trim_start_matches(const raw::String<Alloc>& pattern) const noexcept -> str
+    {
+        return this->trim_start_matches(pattern.as_str());
+    }
+
+    /**
+     * @brief Returns a string slice with all suffixes that match the pattern repeatedly removed.
+     * @param pattern The pattern to search for
+     */
+    template<typename Alloc>
+    [[nodiscard]] auto trim_end_matches(const raw::String<Alloc>& pattern) const noexcept -> str
+    {
+        return this->trim_end_matches(pattern.as_str());
+    }
+
+    /**
+     * @brief Returns a string slice with all leading copies of the given character removed.
+     * @param ch The character to remove
+     */
+    [[nodiscard]] auto trim_start_matches(Char ch) const noexcept -> str
+    {
+        size_t i = 0;
+        while (i < this->m_len)
+        {
+            const auto [current, width] = this->decode_at(i);
+            if (current != ch)
+            {
+                break;
+            }
+
+            i += width;
+        }
+
+        return str(this->m_data + i, this->m_len - i);
+    }
+
+    /**
+     * @brief Returns a string slice with all leading copies of the given character removed.
+     * @param ch The character to remove, interpreted as its numeric value in `[0, 255]`
+     */
+    [[nodiscard]] auto trim_start_matches(char ch) const noexcept -> str
+    {
+        return this->trim_start_matches(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
+    }
+
+    /**
+     * @brief Returns a string slice with all trailing copies of the given character removed.
+     * @param ch The character to remove
+     */
+    [[nodiscard]] auto trim_end_matches(Char ch) const noexcept -> str
+    {
+        size_t end = this->m_len;
+        while (end > 0)
+        {
+            const auto start = this->previous_boundary(end);
+            const auto [current, width] = this->decode_at(start);
+            (void)width;
+
+            if (current != ch)
+            {
+                break;
+            }
+
+            end = start;
+        }
+
+        return str(this->m_data, end);
+    }
+
+    /**
+     * @brief Returns a string slice with all trailing copies of the given character removed.
+     * @param ch The character to remove, interpreted as its numeric value in `[0, 255]`
+     */
+    [[nodiscard]] auto trim_end_matches(char ch) const noexcept -> str
+    {
+        return this->trim_end_matches(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
+    }
+
+    /**
+     * @brief Returns a string slice with all leading and trailing matches of the pattern removed.
+     * @param pattern The pattern to remove
+     */
+    [[nodiscard]] auto trim_matches(const str& pattern) const noexcept -> str
+    {
+        return this->trim_start_matches(pattern).trim_end_matches(pattern);
+    }
+
+    /**
+     * @brief Returns a string slice with all leading and trailing matches of the pattern removed.
+     * @param pattern The pattern to remove
+     */
+    template<typename Alloc>
+    [[nodiscard]] auto trim_matches(const raw::String<Alloc>& pattern) const noexcept -> str
+    {
+        return this->trim_matches(pattern.as_str());
+    }
+
+    /**
+     * @brief Returns a string slice with all leading and trailing matches of the pattern removed.
+     * @param pattern The pattern to remove
+     * @note Panics if the pattern is not a valid UTF-8 sequence
+     */
+    [[nodiscard]] auto trim_matches(const char* pattern) const noexcept -> str
+    {
+        return this->trim_matches(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::trim_matches#pattern"));
+    }
+
+    /**
+     * @brief Returns a string slice with all leading and trailing copies of the given character removed.
+     * @param ch The character to remove
+     */
+    [[nodiscard]] auto trim_matches(Char ch) const noexcept -> str
+    {
+        return this->trim_start_matches(ch).trim_end_matches(ch);
+    }
+
+    /**
+     * @brief Returns a string slice with all leading and trailing copies of the given character removed.
+     * @param ch The character to remove, interpreted as its numeric value in `[0, 255]`
+     */
+    [[nodiscard]] auto trim_matches(char ch) const noexcept -> str
+    {
+        return this->trim_matches(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
+    }
+
+    /**
+     * @brief Returns a string slice with all leading and trailing characters matching `pred` removed.
+     * @tparam Pred A predicate callable with a `Char`
+     * @param pred The predicate deciding which characters to remove
+     */
+    template<typename Pred>
+        requires std::predicate<Pred, Char>
+    [[nodiscard]] auto trim_matches(Pred pred) const noexcept -> str
+    {
+        size_t start = 0;
+        while (start < this->m_len)
+        {
+            const auto [ch, width] = this->decode_at(start);
+            if (!pred(ch))
+            {
+                break;
+            }
+
+            start += width;
+        }
+
+        size_t end = this->m_len;
+        while (end > start)
+        {
+            const auto previous = this->previous_boundary(end);
+            const auto [ch, width] = this->decode_at(previous);
+            (void)width;
+
+            if (!pred(ch))
+            {
+                break;
+            }
+
+            end = previous;
+        }
+
+        return str(this->m_data + start, end - start);
+    }
+
 // iterators
 private:
+    /**
+     * @brief Owns a byte pattern: either borrowed bytes or the UTF-8 encoding of a Char
+     * @details Byte patterns that came from a `str`/`const char*` keep pointing at the
+     *          caller's storage (borrow semantics). Character patterns are encoded into
+     *          `buffer` and stay valid as long as this holder lives, which lets iterators
+     *          own their pattern safely.
+     */
+    struct pattern_holder
+    {
+        std::byte buffer[4] = {};
+        const std::byte* external = nullptr;
+        size_t length = 0;
+
+        [[nodiscard]] static constexpr auto from_str(const str& s) noexcept -> pattern_holder
+        {
+            pattern_holder result;
+            result.external = s.m_data;
+            result.length = s.m_len;
+
+            return result;
+        }
+
+        [[nodiscard]] static constexpr auto from_char(Char ch) noexcept -> pattern_holder
+        {
+            pattern_holder result;
+            result.length = ch.encode_utf8(result.buffer);
+
+            return result;
+        }
+
+        [[nodiscard]] constexpr auto data() const noexcept -> const std::byte*
+        {
+            return this->external != nullptr ? this->external : this->buffer;
+        }
+
+        [[nodiscard]] constexpr auto size() const noexcept -> size_t
+        {
+            return this->length;
+        }
+
+        [[nodiscard]] constexpr auto empty() const noexcept -> bool
+        {
+            return this->length == 0;
+        }
+    };
+
+    /**
+     * @brief Searches a UTF-8 subject for a byte pattern, forwards and backwards
+     * @details Mirrors Rust's `Searcher`. The empty pattern matches at every code point
+     *          boundary of the subject (including both ends).
+     */
+    struct pattern_searcher
+    {
+        const std::byte* subject = nullptr;
+        size_t subject_len = 0;
+        pattern_holder pattern;
+        size_t front = 0;
+        size_t back = 0;
+        bool front_done = false;
+        bool back_done = false;
+
+        constexpr pattern_searcher() noexcept = default;
+
+        constexpr pattern_searcher(const str& s, const pattern_holder& pattern) noexcept
+            : subject(s.m_data), subject_len(s.m_len), pattern(pattern), front(0), back(s.m_len) {}
+
+        /**
+         * @brief Returns the code point boundary strictly before `index`
+         */
+        [[nodiscard]] constexpr auto previous_boundary(size_t index) const noexcept -> size_t
+        {
+            size_t i = index - 1;
+            while (i > 0 && (static_cast<std::uint8_t>(this->subject[i]) & 0xC0) == 0x80)
+            {
+                i -= 1;
+            }
+
+            return i;
+        }
+
+        /** @brief Returns the next match as a half-open byte range, or None */
+        [[nodiscard]] constexpr auto next_match() noexcept -> Option<std::pair<size_t, size_t>>
+        {
+            if (this->front_done)
+            {
+                return None{};
+            }
+
+            if (this->pattern.empty())
+            {
+                if (this->front > this->subject_len)
+                {
+                    this->front_done = true;
+                    return None{};
+                }
+
+                const auto at = this->front;
+                if (at == this->subject_len)
+                {
+                    this->front = at + 1;
+                }
+                else
+                {
+                    this->front = at + str::utf8_sequence_len(this->subject[at]);
+                }
+
+                return std::pair<size_t, size_t>{at, at};
+            }
+
+            const auto pattern_len = this->pattern.size();
+            if (this->front + pattern_len > this->subject_len)
+            {
+                this->front_done = true;
+                return None{};
+            }
+
+            const auto found = std::search(
+                this->subject + this->front,
+                this->subject + this->subject_len,
+                this->pattern.data(),
+                this->pattern.data() + pattern_len
+            );
+
+            if (found == this->subject + this->subject_len)
+            {
+                this->front_done = true;
+                return None{};
+            }
+
+            const auto index = static_cast<size_t>(found - this->subject);
+            this->front = index + pattern_len;
+
+            return std::pair<size_t, size_t>{index, index + pattern_len};
+        }
+
+        /** @brief Returns the previous match (rightmost first), or None */
+        [[nodiscard]] constexpr auto next_match_back() noexcept -> Option<std::pair<size_t, size_t>>
+        {
+            if (this->back_done)
+            {
+                return None{};
+            }
+
+            if (this->pattern.empty())
+            {
+                const auto at = this->back;
+                if (at == 0)
+                {
+                    this->back_done = true;
+                }
+                else
+                {
+                    this->back = this->previous_boundary(at);
+                }
+
+                return std::pair<size_t, size_t>{at, at};
+            }
+
+            const auto pattern_len = this->pattern.size();
+            if (this->back == 0 || pattern_len > this->back)
+            {
+                this->back_done = true;
+                return None{};
+            }
+
+            const auto found = std::find_end(
+                this->subject,
+                this->subject + this->back,
+                this->pattern.data(),
+                this->pattern.data() + pattern_len
+            );
+
+            if (found == this->subject + this->back)
+            {
+                this->back_done = true;
+                return None{};
+            }
+
+            const auto index = static_cast<size_t>(found - this->subject);
+            this->back = index;
+
+            return std::pair<size_t, size_t>{index, index + pattern_len};
+        }
+    };
+
+    /**
+     * @brief The shared state behind every split iterator
+     * @details Mirrors Rust's `SplitInternal`: `start`/`end` bound the not-yet-emitted
+     *          part of the subject while the searcher keeps its own cursor.
+     */
+    struct split_state
+    {
+        pattern_searcher search;
+        size_t start = 0;
+        size_t end = 0;
+        bool allow_trailing_empty = true;
+        bool finished = false;
+
+        constexpr split_state() noexcept = default;
+
+        constexpr split_state(const str& s, const pattern_holder& pattern, bool allow_trailing_empty) noexcept
+            : search(s, pattern), start(0), end(s.m_len), allow_trailing_empty(allow_trailing_empty) {}
+
+        [[nodiscard]] constexpr auto get_end() noexcept -> Option<plain_str>
+        {
+            if (!this->finished)
+            {
+                this->finished = true;
+                if (this->allow_trailing_empty || this->end - this->start > 0)
+                {
+                    return plain_str(this->search.subject + this->start, this->end - this->start);
+                }
+            }
+
+            return None{};
+        }
+
+        [[nodiscard]] constexpr auto next() noexcept -> Option<plain_str>
+        {
+            if (this->finished)
+            {
+                return None{};
+            }
+
+            const auto match = this->search.next_match();
+            if (match.is_none())
+            {
+                return this->get_end();
+            }
+
+            const auto index = match.unwrap().first;
+            const auto piece = plain_str(this->search.subject + this->start, index - this->start);
+            this->start = match.unwrap().second;
+
+            return piece;
+        }
+
+        [[nodiscard]] constexpr auto next_inclusive() noexcept -> Option<plain_str>
+        {
+            if (this->finished)
+            {
+                return None{};
+            }
+
+            const auto match = this->search.next_match();
+            if (match.is_none())
+            {
+                return this->get_end();
+            }
+
+            const auto index = match.unwrap().second;
+            const auto piece = plain_str(this->search.subject + this->start, index - this->start);
+            this->start = index;
+
+            return piece;
+        }
+
+        [[nodiscard]] constexpr auto next_back_inner() noexcept -> Option<plain_str>
+        {
+            const auto match = this->search.next_match_back();
+            if (match.is_none())
+            {
+                this->finished = true;
+                return plain_str(this->search.subject + this->start, this->end - this->start);
+            }
+
+            const auto start_index = match.unwrap().first;
+            const auto end_index = match.unwrap().second;
+            const auto piece = plain_str(this->search.subject + end_index, this->end - end_index);
+            this->end = start_index;
+
+            return piece;
+        }
+
+        [[nodiscard]] constexpr auto next_back_inclusive_inner() noexcept -> Option<plain_str>
+        {
+            const auto match = this->search.next_match_back();
+            if (match.is_none())
+            {
+                this->finished = true;
+                return plain_str(this->search.subject + this->start, this->end - this->start);
+            }
+
+            const auto end_index = match.unwrap().second;
+            const auto piece = plain_str(this->search.subject + end_index, this->end - end_index);
+            this->end = end_index;
+
+            return piece;
+        }
+
+        [[nodiscard]] constexpr auto next_back() noexcept -> Option<plain_str>
+        {
+            if (this->finished)
+            {
+                return None{};
+            }
+
+            if (!this->allow_trailing_empty)
+            {
+                this->allow_trailing_empty = true;
+                const auto candidate = this->next_back_inner();
+                if (candidate.is_some() && candidate.unwrap().len != 0)
+                {
+                    return candidate;
+                }
+                if (this->finished)
+                {
+                    return None{};
+                }
+            }
+
+            return this->next_back_inner();
+        }
+
+        [[nodiscard]] constexpr auto next_back_inclusive() noexcept -> Option<plain_str>
+        {
+            if (this->finished)
+            {
+                return None{};
+            }
+
+            if (!this->allow_trailing_empty)
+            {
+                this->allow_trailing_empty = true;
+                const auto candidate = this->next_back_inclusive_inner();
+                if (candidate.is_some() && candidate.unwrap().len != 0)
+                {
+                    return candidate;
+                }
+                if (this->finished)
+                {
+                    return None{};
+                }
+            }
+
+            return this->next_back_inclusive_inner();
+        }
+    };
+
     struct Lines
     {
         struct LinesIter
@@ -1077,7 +2491,16 @@ private:
                 {
                     // Initialize the first line
                     auto bytes = s->as_bytes();
+
+                    // An empty string has no lines (matches Rust)
+                    if (bytes.empty())
+                    {
+                        this->s = nullptr;
+                        return;
+                    }
+
                     size_t pos = 0;
+                    bool found = false;
 
                     // Find the first line ending
                     while (pos < bytes.size())
@@ -1088,6 +2511,7 @@ private:
                             span = plain_str(bytes.data() + start, pos - start);
                             pos += 1; // Skip \n
                             skip = 1;
+                            found = true;
 
                             break;
                         }
@@ -1097,17 +2521,17 @@ private:
                             span = plain_str(bytes.data() + start, pos - start);
                             pos += 2; // Skip \r\n
                             skip = 2;
+                            found = true;
 
                             break;
                         }
                         pos++;
                     }
 
-                    // If no line ending found, take the whole string
-                    if (pos >= bytes.size())
+                    // If no line ending was found, the whole string is a single line
+                    if (!found)
                     {
                         span = plain_str(bytes.data(), bytes.size());
-                        pos = bytes.size();
                     }
                 }
             }
@@ -1199,79 +2623,62 @@ private:
         }
     };
 
+    /**
+     * @brief Iterates over the matched slices, forwards or backwards
+     */
     struct Matches
     {
         struct MatchesIter
         {
             using iterator_category = std::forward_iterator_tag;
             using difference_type = std::ptrdiff_t;
-            using value_type = size_t;
-            using pointer = const size_t*;
-            using reference = const size_t&;
+            using value_type = str;
+            using pointer = const value_type*;
+            using reference = value_type;
 
             const str* s = nullptr;
-            plain_str pattern;
-            size_t match_pos = 0;
-            size_t pos = 0;
+            pattern_searcher search;
+            bool reverse = false;
+            plain_str current_match;
 
-            constexpr MatchesIter() noexcept = default;
+            constexpr explicit MatchesIter() noexcept = default;
 
-            constexpr MatchesIter(const str* s, const plain_str& pattern) noexcept : s(s), pattern(pattern)
+            constexpr MatchesIter(const str* s, const pattern_holder& pattern, bool reverse) noexcept
+                : s(s), reverse(reverse)
             {
                 if (s != nullptr)
                 {
-                    // Find the first match
-                    auto ptr = std::search(s->m_data, s->m_data + s->m_len, pattern.data, pattern.data + pattern.len);
-                    if (ptr != s->m_data + s->m_len && pattern.len > 0)
-                    {
-                        const auto match_pos = ptr - s->m_data;
-                        this->match_pos = match_pos;
-                        this->pos = match_pos + pattern.len;
-                    }
-                    else
-                    {
-                        // No match found, set to end iterator
-                        this->s = nullptr;
-                    }
+                    this->search = pattern_searcher(*s, pattern);
+                    this->advance();
                 }
             }
 
-            [[nodiscard]] constexpr auto operator*() const noexcept -> reference
+            constexpr auto advance() noexcept -> void
             {
-                return this->match_pos;
+                if (this->s == nullptr)
+                {
+                    return;
+                }
+
+                const auto match = this->reverse ? this->search.next_match_back() : this->search.next_match();
+                if (match.is_none())
+                {
+                    this->s = nullptr;
+                    return;
+                }
+
+                const auto found = match.unwrap();
+                this->current_match = plain_str(this->search.subject + found.first, found.second - found.first);
             }
 
-            [[nodiscard]] constexpr auto operator->() const noexcept -> pointer
+            [[nodiscard]] constexpr auto operator*() const noexcept -> value_type
             {
-                return &this->match_pos;
+                return str::from_bytes_unchecked(this->current_match.data, this->current_match.len);
             }
 
             constexpr auto operator++() noexcept -> MatchesIter&
             {
-                if (this->s == nullptr)
-                {
-                    return *this;
-                }
-
-                // Search for the next match starting from the position after the last match
-                auto ptr = std::search(
-                    this->s->m_data + this->pos,
-                    this->s->m_data + this->s->m_len,
-                    this->pattern.data,
-                    this->pattern.data + this->pattern.len
-                );
-
-                if (ptr != this->s->m_data + this->s->m_len)
-                {
-                    const auto match_pos = ptr - this->s->m_data;
-                    this->match_pos = match_pos;
-                    this->pos = match_pos + this->pattern.len;
-                }
-                else
-                {
-                    // No more matches, set to end iterator
-                    this->s = nullptr;
-                }
+                this->advance();
 
                 return *this;
             }
@@ -1280,6 +2687,7 @@ private:
             {
                 MatchesIter temp = *this;
                 ++(*this);
+
                 return temp;
             }
 
@@ -1289,25 +2697,135 @@ private:
             }
         };
 
-        const str* s;
-        plain_str pattern;
+        const str* s = nullptr;
+        pattern_holder pattern;
+        bool reverse = false;
 
-        constexpr Matches(const str& s, const plain_str& pattern) noexcept : s(&s), pattern(pattern) {}
+        constexpr Matches(const str& s, const pattern_holder& pattern, bool reverse) noexcept
+            : s(&s), pattern(pattern), reverse(reverse) {}
 
         [[nodiscard]] constexpr auto begin() const noexcept -> MatchesIter
         {
-            return MatchesIter(this->s, this->pattern);
+            return MatchesIter(this->s, this->pattern, this->reverse);
         }
 
         [[nodiscard]] constexpr auto end() const noexcept -> MatchesIter
         {
-            return MatchesIter(nullptr, this->pattern);
+            return MatchesIter();
         }
 
         using iterator = MatchesIter;
         using const_iterator = MatchesIter;
     };
 
+    /**
+     * @brief Iterates over `(byte index, matched slice)` pairs, forwards or backwards
+     */
+    struct MatchIndices
+    {
+        struct MatchIndicesIter
+        {
+            using iterator_category = std::forward_iterator_tag;
+            using difference_type = std::ptrdiff_t;
+            using value_type = std::pair<size_t, str>;
+            using pointer = const value_type*;
+            using reference = value_type;
+
+            const str* s = nullptr;
+            pattern_searcher search;
+            bool reverse = false;
+            size_t current_index = 0;
+            plain_str current_match;
+
+            constexpr explicit MatchIndicesIter() noexcept = default;
+
+            constexpr MatchIndicesIter(const str* s, const pattern_holder& pattern, bool reverse) noexcept
+                : s(s), reverse(reverse)
+            {
+                if (s != nullptr)
+                {
+                    this->search = pattern_searcher(*s, pattern);
+                    this->advance();
+                }
+            }
+
+            constexpr auto advance() noexcept -> void
+            {
+                if (this->s == nullptr)
+                {
+                    return;
+                }
+
+                const auto match = this->reverse ? this->search.next_match_back() : this->search.next_match();
+                if (match.is_none())
+                {
+                    this->s = nullptr;
+                    return;
+                }
+
+                this->current_index = match.unwrap().first;
+                this->current_match = plain_str(
+                    this->search.subject + this->current_index,
+                    match.unwrap().second - this->current_index
+                );
+            }
+
+            [[nodiscard]] constexpr auto operator*() const noexcept -> value_type
+            {
+                return value_type{
+                    this->current_index,
+                    str::from_bytes_unchecked(this->current_match.data, this->current_match.len)
+                };
+            }
+
+            constexpr auto operator++() noexcept -> MatchIndicesIter&
+            {
+                this->advance();
+
+                return *this;
+            }
+
+            constexpr auto operator++(int) noexcept -> MatchIndicesIter
+            {
+                MatchIndicesIter temp = *this;
+                ++(*this);
+
+                return temp;
+            }
+
+            [[nodiscard]] constexpr auto operator==(const MatchIndicesIter& other) const noexcept -> bool
+            {
+                return this->s == other.s;
+            }
+        };
+
+        const str* s = nullptr;
+        pattern_holder pattern;
+        bool reverse = false;
+
+        constexpr MatchIndices(const str& s, const pattern_holder& pattern, bool reverse) noexcept
+            : s(&s), pattern(pattern), reverse(reverse) {}
+
+        [[nodiscard]] constexpr auto begin() const noexcept -> MatchIndicesIter
+        {
+            return MatchIndicesIter(this->s, this->pattern, this->reverse);
+        }
+
+        [[nodiscard]] constexpr auto end() const noexcept -> MatchIndicesIter
+        {
+            return MatchIndicesIter();
+        }
+
+        using iterator = MatchIndicesIter;
+        using const_iterator = MatchIndicesIter;
+    };
+
+    /**
+     * @brief A lazy split of a `str` that covers the whole split family
+     * @details The same range type backs `split`, `rsplit`, `splitn`, `rsplitn`,
+     *          `split_terminator`, `rsplit_terminator`, `split_inclusive` and
+     *          `rsplit_inclusive`; the constructor flags select the variant.
+     */
     struct Split
     {
         struct SplitIter
@@ -1319,69 +2837,87 @@ private:
             using reference = const plain_str&;
 
             const str* s = nullptr;
-            plain_str pattern;
+            split_state state;
+            size_t remaining = 0;
+            bool limited = false;
+            bool reverse = false;
+            bool inclusive = false;
             plain_str span;
 
-            constexpr SplitIter() noexcept = default;
+            constexpr explicit SplitIter() noexcept = default;
 
-            constexpr SplitIter(const str* s, const plain_str& pattern) noexcept : s(s), pattern(pattern)
+            constexpr SplitIter(const str* s, const pattern_holder& pattern, bool allow_trailing_empty,
+                                bool limited, size_t limit, bool reverse, bool inclusive) noexcept
+                : s(s), remaining(limit), limited(limited), reverse(reverse), inclusive(inclusive)
             {
-                if (s != nullptr)
+                if (s == nullptr)
                 {
-                    // If pattern is empty, return the entire string
-                    if (pattern.len == 0)
+                    return;
+                }
+
+                this->state = split_state(*s, pattern, allow_trailing_empty);
+                this->advance();
+            }
+
+            constexpr auto set_piece(const Option<plain_str>& piece) noexcept -> void
+            {
+                if (piece.is_none())
+                {
+                    this->s = nullptr;
+                    return;
+                }
+
+                this->span = piece.unwrap();
+            }
+
+            constexpr auto advance() noexcept -> void
+            {
+                if (this->s == nullptr)
+                {
+                    return;
+                }
+
+                if (this->limited)
+                {
+                    if (this->remaining == 0)
                     {
-                        span = plain_str(s->m_data, s->m_len);
+                        this->s = nullptr;
                         return;
                     }
 
-                    auto ptr = std::search(this->s->m_data, this->s->m_data + this->s->m_len, this->pattern.data, this->pattern.data + this->pattern.len);
-                    if (ptr != this->s->m_data + this->s->m_len)
+                    if (this->remaining == 1)
                     {
-                        const auto pos = ptr - this->s->m_data;
-                        this->span = plain_str(s->m_data, size_t(pos));
+                        this->remaining = 0;
+                        this->set_piece(this->state.get_end());
+                        return;
                     }
-                    else
-                    {
-                        span = plain_str(s->m_data, s->m_len);
-                    }
+
+                    this->remaining -= 1;
+                }
+
+                if (this->reverse)
+                {
+                    this->set_piece(this->inclusive ? this->state.next_back_inclusive() : this->state.next_back());
+                }
+                else
+                {
+                    this->set_piece(this->inclusive ? this->state.next_inclusive() : this->state.next());
                 }
             }
 
-            [[nodiscard]] auto operator->() const noexcept -> const plain_str*
-            {
-                return &this->span;
-            }
-
-            [[nodiscard]] auto operator*() const noexcept -> const plain_str&
+            [[nodiscard]] constexpr auto operator*() const noexcept -> const plain_str&
             {
                 return this->span;
             }
 
+            [[nodiscard]] constexpr auto operator->() const noexcept -> const plain_str*
+            {
+                return &this->span;
+            }
+
             constexpr auto operator++() noexcept -> SplitIter&
             {
-                if (this->s == nullptr)
-                {
-                    return *this;
-                }
-
-                size_t start = span.data - this->s->m_data + span.len;
-
-                // Skip the delimiter
-                start += pattern.len;
-
-                // If reached the end after skipping delimiter, end iteration
-                if (start >= this->s->m_len)
-                {
-                    this->s = nullptr;
-                    this->span.len = 0;
-                    return *this;
-                }
-
-                // Find the next split point
-                const auto ptr = std::search(this->s->m_data + start, this->s->m_data + this->s->m_len, this->pattern.data, this->pattern.data + this->pattern.len);
-                const auto pos = ptr - this->s->m_data;
-                this->span = plain_str(this->s->m_data + start, pos - start);
+                this->advance();
 
                 return *this;
             }
@@ -1390,35 +2926,196 @@ private:
             {
                 SplitIter temp = *this;
                 ++(*this);
+
                 return temp;
             }
 
             [[nodiscard]] constexpr auto operator==(const SplitIter& other) const noexcept -> bool
             {
-                return (this->s == other.s) && (this->pattern == other.pattern);
+                return this->s == other.s;
             }
         };
 
-    public:
         using iterator = SplitIter;
         using const_iterator = SplitIter;
 
-        const str* s;
-        plain_str pattern;
+        const str* s = nullptr;
+        pattern_holder pattern;
+        bool allow_trailing_empty = true;
+        bool limited = false;
+        size_t limit = 0;
+        bool reverse = false;
+        bool inclusive = false;
 
-    public:
-        constexpr Split(const str& s, const plain_str& pattern) noexcept : s(&s), pattern(pattern) {}
+        constexpr Split() noexcept = default;
 
-    public:
+        constexpr Split(const str& s, const pattern_holder& pattern, bool allow_trailing_empty,
+                        bool limited, size_t limit, bool reverse, bool inclusive) noexcept
+            : s(&s), pattern(pattern), allow_trailing_empty(allow_trailing_empty),
+              limited(limited), limit(limit), reverse(reverse), inclusive(inclusive) {}
+
         [[nodiscard]] constexpr auto begin() const noexcept -> SplitIter
         {
-            return SplitIter(this->s, this->pattern);
+            return SplitIter(
+                this->s,
+                this->pattern,
+                this->allow_trailing_empty,
+                this->limited,
+                this->limit,
+                this->reverse,
+                this->inclusive
+            );
         }
 
         [[nodiscard]] constexpr auto end() const noexcept -> SplitIter
         {
-            return SplitIter(nullptr, this->pattern);
+            return SplitIter();
         }
+    };
+
+    /**
+     * @brief Builds a `Split` range for this string
+     * @param pattern The pattern to split on
+     * @param allow_trailing_empty Whether a trailing empty piece is kept / a leading empty piece is emitted
+     * @param limited Whether the split is limited to `limit` parts
+     * @param limit The maximum number of parts for `splitn`/`rsplitn`
+     * @param reverse Whether parts are produced from the right
+     * @param inclusive Whether each separator stays on the part it terminates
+     */
+    [[nodiscard]] constexpr auto make_split(const pattern_holder& pattern, bool allow_trailing_empty,
+        bool limited, size_t limit, bool reverse, bool inclusive) const noexcept -> Split
+    {
+        return Split(*this, pattern, allow_trailing_empty, limited, limit, reverse, inclusive);
+    }
+
+    /**
+     * @brief Splits a `str` on runs of Unicode whitespace, yielding no empty pieces
+     */
+    struct SplitWhitespace
+    {
+        struct SplitWhitespaceIter
+        {
+            using iterator_category = std::forward_iterator_tag;
+            using difference_type = std::ptrdiff_t;
+            using value_type = plain_str;
+            using pointer = const plain_str*;
+            using reference = const plain_str&;
+
+            const str* s = nullptr;
+            size_t pos = 0;
+            plain_str span;
+
+            constexpr explicit SplitWhitespaceIter() noexcept = default;
+
+            explicit SplitWhitespaceIter(const str* s) noexcept : s(s)
+            {
+                if (s != nullptr)
+                {
+                    this->advance();
+                }
+            }
+
+            auto advance() noexcept -> void
+            {
+                if (this->s == nullptr)
+                {
+                    return;
+                }
+
+                utf8proc_int32_t codepoint = 0;
+                const auto size = this->s->size();
+
+                // Skip any run of whitespace
+                while (this->pos < size)
+                {
+                    const auto step = utf8proc_iterate(
+                        reinterpret_cast<const utf8proc_uint8_t*>(this->s->m_data + this->pos),
+                        size - this->pos,
+                        &codepoint
+                    );
+
+                    if (!Char::from_u32_unchecked(static_cast<std::uint32_t>(codepoint)).is_whitespace())
+                    {
+                        break;
+                    }
+
+                    this->pos += static_cast<size_t>(step);
+                }
+
+                if (this->pos >= size)
+                {
+                    this->s = nullptr;
+                    return;
+                }
+
+                // Take the following non-whitespace run
+                const auto start = this->pos;
+                while (this->pos < size)
+                {
+                    const auto step = utf8proc_iterate(
+                        reinterpret_cast<const utf8proc_uint8_t*>(this->s->m_data + this->pos),
+                        size - this->pos,
+                        &codepoint
+                    );
+
+                    if (Char::from_u32_unchecked(static_cast<std::uint32_t>(codepoint)).is_whitespace())
+                    {
+                        break;
+                    }
+
+                    this->pos += static_cast<size_t>(step);
+                }
+
+                this->span = plain_str(this->s->m_data + start, this->pos - start);
+            }
+
+            auto operator++() noexcept -> SplitWhitespaceIter&
+            {
+                this->advance();
+
+                return *this;
+            }
+
+            auto operator++(int) noexcept -> SplitWhitespaceIter
+            {
+                SplitWhitespaceIter temp = *this;
+                ++(*this);
+
+                return temp;
+            }
+
+            [[nodiscard]] constexpr auto operator==(const SplitWhitespaceIter& other) const noexcept -> bool
+            {
+                return this->s == other.s;
+            }
+
+            [[nodiscard]] constexpr auto operator*() const noexcept -> reference
+            {
+                return this->span;
+            }
+
+            [[nodiscard]] constexpr auto operator->() const noexcept -> pointer
+            {
+                return &this->span;
+            }
+        };
+
+        const str* s = nullptr;
+
+        constexpr explicit SplitWhitespace(const str& s) noexcept : s(&s) {}
+
+        [[nodiscard]] auto begin() const noexcept -> SplitWhitespaceIter
+        {
+            return SplitWhitespaceIter(this->s);
+        }
+
+        [[nodiscard]] auto end() const noexcept -> SplitWhitespaceIter
+        {
+            return SplitWhitespaceIter();
+        }
+
+        using iterator = SplitWhitespaceIter;
+        using const_iterator = SplitWhitespaceIter;
     };
 
     struct SplitASCIIWhiteSpace
@@ -1610,8 +3307,24 @@ private:
 
             constexpr explicit CharsIter() noexcept = default;
 
-            explicit CharsIter(const str* s, size_t pos) noexcept : s(s), pos(pos)
+            explicit CharsIter(const str* s) noexcept : s(s)
             {
+                this->advance();
+            }
+
+            constexpr auto advance() noexcept -> void
+            {
+                if (this->s == nullptr)
+                {
+                    return;
+                }
+
+                if (this->pos >= this->s->size())
+                {
+                    this->s = nullptr;
+                    return;
+                }
+
                 this->pos += utf8proc_iterate(
                     reinterpret_cast<const utf8proc_uint8_t*>(this->s->data() + this->pos),
                     this->s->size() - this->pos,
@@ -1621,18 +3334,17 @@ private:
 
             constexpr auto operator++() noexcept -> CharsIter&
             {
-                if (this->s == nullptr || this->pos >= this->s->size())
-                {
-                    return *this;
-                }
-
-                this->pos += utf8proc_iterate(
-                    reinterpret_cast<const utf8proc_uint8_t*>(this->s->data() + this->pos),
-                    this->s->size() - this->pos,
-                    reinterpret_cast<utf8proc_int32_t*>(&this->ch)
-                );
+                this->advance();
 
                 return *this;
+            }
+
+            constexpr auto operator++(int) noexcept -> CharsIter
+            {
+                CharsIter temp = *this;
+                ++(*this);
+
+                return temp;
             }
 
             constexpr auto operator->() const noexcept -> pointer
@@ -1647,7 +3359,7 @@ private:
 
             [[nodiscard]] constexpr auto operator==(const CharsIter& other) const noexcept -> bool
             {
-                return this->s->m_data == other.s->m_data && this->pos == other.pos;
+                return this->s == other.s;
             }
         };
 
@@ -1655,16 +3367,111 @@ private:
 
         auto begin() const noexcept -> CharsIter
         {
-            return CharsIter(this->s, 0);
+            return CharsIter(this->s);
         }
 
         auto end() const noexcept -> CharsIter
         {
-            return CharsIter(this->s, this->s->size());
+            return CharsIter();
         }
 
         using iterator = CharsIter;
         using const_iterator = CharsIter;
+    };
+
+    struct CharIndices
+    {
+        const str* s = nullptr;
+
+        struct CharIndicesIter
+        {
+            using iterator_category = std::forward_iterator_tag;
+            using difference_type = std::ptrdiff_t;
+            using value_type = std::pair<size_t, Char>;
+            using pointer = const value_type*;
+            using reference = const value_type&;
+
+            const str* s = nullptr;
+            size_t pos = 0;
+            value_type current{};
+
+            constexpr explicit CharIndicesIter() noexcept = default;
+
+            explicit CharIndicesIter(const str* s) noexcept : s(s)
+            {
+                this->advance();
+            }
+
+            constexpr auto advance() noexcept -> void
+            {
+                if (this->s == nullptr)
+                {
+                    return;
+                }
+
+                if (this->pos >= this->s->size())
+                {
+                    this->s = nullptr;
+                    return;
+                }
+
+                utf8proc_int32_t codepoint = 0;
+                const auto index = this->pos;
+                const auto step = utf8proc_iterate(
+                    reinterpret_cast<const utf8proc_uint8_t*>(this->s->data() + this->pos),
+                    this->s->size() - this->pos,
+                    &codepoint
+                );
+
+                this->pos += static_cast<size_t>(step);
+                this->current = value_type(index, Char::from_u32_unchecked(static_cast<std::uint32_t>(codepoint)));
+            }
+
+            constexpr auto operator++() noexcept -> CharIndicesIter&
+            {
+                this->advance();
+
+                return *this;
+            }
+
+            constexpr auto operator++(int) noexcept -> CharIndicesIter
+            {
+                CharIndicesIter temp = *this;
+                ++(*this);
+
+                return temp;
+            }
+
+            [[nodiscard]] constexpr auto operator==(const CharIndicesIter& other) const noexcept -> bool
+            {
+                return this->s == other.s;
+            }
+
+            [[nodiscard]] constexpr auto operator*() const noexcept -> reference
+            {
+                return this->current;
+            }
+
+            [[nodiscard]] constexpr auto operator->() const noexcept -> pointer
+            {
+                return &this->current;
+            }
+        };
+
+        constexpr explicit CharIndices(const str& s) noexcept : s(&s) {}
+
+        [[nodiscard]] constexpr auto begin() const noexcept -> CharIndicesIter
+        {
+            return CharIndicesIter(this->s);
+        }
+
+        [[nodiscard]] constexpr auto end() const noexcept -> CharIndicesIter
+        {
+            return CharIndicesIter();
+        }
+
+        using iterator = CharIndicesIter;
+        using const_iterator = CharIndicesIter;
     };
 
     struct Graphemes
@@ -1686,7 +3493,7 @@ private:
 
             constexpr explicit GraphemesIter() noexcept = default;
 
-            constexpr explicit GraphemesIter(const str* s, size_t pos) noexcept : s(s), pos(pos)
+            constexpr explicit GraphemesIter(const str* s) noexcept : s(s)
             {
                 if (s != nullptr)
                 {
@@ -1696,8 +3503,14 @@ private:
 
             constexpr auto advance() noexcept -> void
             {
-                if (this->s == nullptr || this->pos >= this->s->size())
+                if (this->s == nullptr)
                 {
+                    return;
+                }
+
+                if (this->pos >= this->s->size())
+                {
+                    this->s = nullptr;
                     return;
                 }
 
@@ -1749,7 +3562,7 @@ private:
 
             [[nodiscard]] constexpr auto operator==(const GraphemesIter& other) const noexcept -> bool
             {
-                return this->s == other.s && this->pos == other.pos;
+                return this->s == other.s;
             }
 
             [[nodiscard]] constexpr auto operator*() const noexcept -> reference
@@ -1767,12 +3580,12 @@ private:
 
         [[nodiscard]] constexpr auto begin() const noexcept -> GraphemesIter
         {
-            return GraphemesIter(this->s, 0);
+            return GraphemesIter(this->s);
         }
 
         [[nodiscard]] constexpr auto end() const noexcept -> GraphemesIter
         {
-            return GraphemesIter(this->s, this->s->size());
+            return GraphemesIter();
         }
 
         using iterator = GraphemesIter;
@@ -1786,6 +3599,15 @@ public:
     }
 
     /**
+     * @brief Returns an iterator over the byte index and character of this string
+     * @return A CharIndices iterator that yields each (byte index, Char) pair
+     */
+    [[nodiscard]] constexpr auto char_indices() const noexcept -> CharIndices
+    {
+        return CharIndices(*this);
+    }
+
+    /**
      * @brief Returns an iterator over the lines of this string
      * @return A Lines iterator that yields each line in the string
      */
@@ -1795,25 +3617,215 @@ public:
     }
 
     /**
-     * @brief Returns an iterator that yields index of each match of the pattern in the str
+     * @brief Returns an iterator over the disjoint matches of the pattern
      * @param pattern The pattern to match against
-     * @return A Matches iterator that yields each match in the string
+     * @return A Matches iterator that yields each matched slice
      */
     [[nodiscard]] constexpr auto matches(const str& pattern) const noexcept -> Matches
     {
-        return Matches(*this, plain_str(pattern.m_data, pattern.m_len));
+        return Matches(*this, pattern_holder::from_str(pattern), false);
     }
 
+    /**
+     * @brief Returns an iterator over the disjoint matches of the pattern
+     * @param pattern The pattern to match against
+     * @return A Matches iterator that yields each matched slice
+     */
     template<typename Alloc>
     [[nodiscard]] constexpr auto matches(const raw::String<Alloc>& pattern) const noexcept -> Matches
     {
-        return Matches(*this, plain_str(pattern.m_data, pattern.m_len));
+        return Matches(*this, pattern_holder::from_str(pattern.as_str()), false);
     }
 
+    /**
+     * @brief Returns an iterator over the disjoint matches of the pattern
+     * @param pattern The pattern to match against
+     * @return A Matches iterator that yields each matched slice
+     * @note Panics if the pattern is not a valid UTF-8 sequence
+     */
     [[nodiscard]] auto matches(const char* pattern) const noexcept -> Matches
     {
-        const auto s = str::from(pattern).ok().expect_take("Invalid UTF-8 sequence while calling str::split#pattern");
-        return Matches(*this, plain_str(s.data(), s.size()));
+        return Matches(*this, pattern_holder::from_str(
+            str::from(pattern).expect("Invalid UTF-8 sequence while calling str::matches#pattern")), false);
+    }
+
+    /**
+     * @brief Returns an iterator over the disjoint matches of the given character
+     * @param ch The character to match
+     * @return A Matches iterator that yields each matched slice
+     */
+    [[nodiscard]] constexpr auto matches(Char ch) const noexcept -> Matches
+    {
+        return Matches(*this, pattern_holder::from_char(ch), false);
+    }
+
+    /**
+     * @brief Returns an iterator over the disjoint matches of the given character
+     * @param ch The character to match, interpreted as its numeric value in `[0, 255]`
+     * @return A Matches iterator that yields each matched slice
+     */
+    [[nodiscard]] constexpr auto matches(char ch) const noexcept -> Matches
+    {
+        return this->matches(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
+    }
+
+    /**
+     * @brief Returns an iterator over the disjoint matches of the pattern, in reverse order
+     * @param pattern The pattern to match against
+     * @return A Matches iterator that yields each matched slice, from the end
+     */
+    [[nodiscard]] constexpr auto rmatches(const str& pattern) const noexcept -> Matches
+    {
+        return Matches(*this, pattern_holder::from_str(pattern), true);
+    }
+
+    /**
+     * @brief Returns an iterator over the disjoint matches of the pattern, in reverse order
+     * @param pattern The pattern to match against
+     * @return A Matches iterator that yields each matched slice, from the end
+     */
+    template<typename Alloc>
+    [[nodiscard]] constexpr auto rmatches(const raw::String<Alloc>& pattern) const noexcept -> Matches
+    {
+        return Matches(*this, pattern_holder::from_str(pattern.as_str()), true);
+    }
+
+    /**
+     * @brief Returns an iterator over the disjoint matches of the pattern, in reverse order
+     * @param pattern The pattern to match against
+     * @return A Matches iterator that yields each matched slice, from the end
+     * @note Panics if the pattern is not a valid UTF-8 sequence
+     */
+    [[nodiscard]] auto rmatches(const char* pattern) const noexcept -> Matches
+    {
+        return Matches(*this, pattern_holder::from_str(
+            str::from(pattern).expect("Invalid UTF-8 sequence while calling str::rmatches#pattern")), true);
+    }
+
+    /**
+     * @brief Returns an iterator over the disjoint matches of the given character, in reverse order
+     * @param ch The character to match
+     * @return A Matches iterator that yields each matched slice, from the end
+     */
+    [[nodiscard]] constexpr auto rmatches(Char ch) const noexcept -> Matches
+    {
+        return Matches(*this, pattern_holder::from_char(ch), true);
+    }
+
+    /**
+     * @brief Returns an iterator over the disjoint matches of the given character, in reverse order
+     * @param ch The character to match, interpreted as its numeric value in `[0, 255]`
+     * @return A Matches iterator that yields each matched slice, from the end
+     */
+    [[nodiscard]] constexpr auto rmatches(char ch) const noexcept -> Matches
+    {
+        return this->rmatches(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
+    }
+
+    /**
+     * @brief Returns an iterator over the `(byte index, match)` pairs of the pattern
+     * @param pattern The pattern to match against
+     * @return A MatchIndices iterator yielding each `(index, matched str)` pair
+     */
+    [[nodiscard]] constexpr auto match_indices(const str& pattern) const noexcept -> MatchIndices
+    {
+        return MatchIndices(*this, pattern_holder::from_str(pattern), false);
+    }
+
+    /**
+     * @brief Returns an iterator over the `(byte index, match)` pairs of the pattern
+     * @param pattern The pattern to match against
+     * @return A MatchIndices iterator yielding each `(index, matched str)` pair
+     */
+    template<typename Alloc>
+    [[nodiscard]] constexpr auto match_indices(const raw::String<Alloc>& pattern) const noexcept -> MatchIndices
+    {
+        return MatchIndices(*this, pattern_holder::from_str(pattern.as_str()), false);
+    }
+
+    /**
+     * @brief Returns an iterator over the `(byte index, match)` pairs of the pattern
+     * @param pattern The pattern to match against
+     * @return A MatchIndices iterator yielding each `(index, matched str)` pair
+     * @note Panics if the pattern is not a valid UTF-8 sequence
+     */
+    [[nodiscard]] auto match_indices(const char* pattern) const noexcept -> MatchIndices
+    {
+        return MatchIndices(*this, pattern_holder::from_str(
+            str::from(pattern).expect("Invalid UTF-8 sequence while calling str::match_indices#pattern")), false);
+    }
+
+    /**
+     * @brief Returns an iterator over the `(byte index, match)` pairs of the given character
+     * @param ch The character to match
+     * @return A MatchIndices iterator yielding each `(index, matched str)` pair
+     */
+    [[nodiscard]] constexpr auto match_indices(Char ch) const noexcept -> MatchIndices
+    {
+        return MatchIndices(*this, pattern_holder::from_char(ch), false);
+    }
+
+    /**
+     * @brief Returns an iterator over the `(byte index, match)` pairs of the given character
+     * @param ch The character to match, interpreted as its numeric value in `[0, 255]`
+     * @return A MatchIndices iterator yielding each `(index, matched str)` pair
+     */
+    [[nodiscard]] constexpr auto match_indices(char ch) const noexcept -> MatchIndices
+    {
+        return this->match_indices(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
+    }
+
+    /**
+     * @brief Returns a reverse iterator over the `(byte index, match)` pairs of the pattern
+     * @param pattern The pattern to match against
+     * @return A MatchIndices iterator yielding each `(index, matched str)` pair in reverse order
+     */
+    [[nodiscard]] constexpr auto rmatch_indices(const str& pattern) const noexcept -> MatchIndices
+    {
+        return MatchIndices(*this, pattern_holder::from_str(pattern), true);
+    }
+
+    /**
+     * @brief Returns a reverse iterator over the `(byte index, match)` pairs of the pattern
+     * @param pattern The pattern to match against
+     * @return A MatchIndices iterator yielding each `(index, matched str)` pair in reverse order
+     */
+    template<typename Alloc>
+    [[nodiscard]] constexpr auto rmatch_indices(const raw::String<Alloc>& pattern) const noexcept -> MatchIndices
+    {
+        return MatchIndices(*this, pattern_holder::from_str(pattern.as_str()), true);
+    }
+
+    /**
+     * @brief Returns a reverse iterator over the `(byte index, match)` pairs of the pattern
+     * @param pattern The pattern to match against
+     * @return A MatchIndices iterator yielding each `(index, matched str)` pair in reverse order
+     * @note Panics if the pattern is not a valid UTF-8 sequence
+     */
+    [[nodiscard]] auto rmatch_indices(const char* pattern) const noexcept -> MatchIndices
+    {
+        return MatchIndices(*this, pattern_holder::from_str(
+            str::from(pattern).expect("Invalid UTF-8 sequence while calling str::rmatch_indices#pattern")), true);
+    }
+
+    /**
+     * @brief Returns a reverse iterator over the `(byte index, match)` pairs of the given character
+     * @param ch The character to match
+     * @return A MatchIndices iterator yielding each `(index, matched str)` pair in reverse order
+     */
+    [[nodiscard]] constexpr auto rmatch_indices(Char ch) const noexcept -> MatchIndices
+    {
+        return MatchIndices(*this, pattern_holder::from_char(ch), true);
+    }
+
+    /**
+     * @brief Returns a reverse iterator over the `(byte index, match)` pairs of the given character
+     * @param ch The character to match, interpreted as its numeric value in `[0, 255]`
+     * @return A MatchIndices iterator yielding each `(index, matched str)` pair in reverse order
+     */
+    [[nodiscard]] constexpr auto rmatch_indices(char ch) const noexcept -> MatchIndices
+    {
+        return this->rmatch_indices(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
     }
 
     /**
@@ -1823,7 +3835,7 @@ public:
      */
     [[nodiscard]] constexpr auto split(const str& pattern) const noexcept -> Split
     {
-        return Split(*this, plain_str(pattern.m_data, pattern.m_len));
+        return this->make_split(pattern_holder::from_str(pattern), true, false, 0, false, false);
     }
 
     /**
@@ -1834,19 +3846,558 @@ public:
     template<typename Alloc>
     [[nodiscard]] constexpr auto split(const raw::String<Alloc>& pattern) const noexcept -> Split
     {
-        return Split(*this, plain_str(pattern.m_data, pattern.m_len));
+        return this->split(pattern.as_str());
     }
 
     /**
      * @brief Returns an iterator that splits the string by the given pattern
      * @param pattern The pattern to split on
      * @return A Split iterator that yields each part of the split string
-     * @note Panics If the pattern is not a valid UTF-8 sequence
+     * @note Panics if the pattern is not a valid UTF-8 sequence
      */
     [[nodiscard]] auto split(const char* pattern) const noexcept -> Split
     {
-        const auto s = str::from(pattern).ok().expect_take("Invalid UTF-8 sequence while calling str::split#pattern");
-        return Split(*this, plain_str(s.m_data, s.m_len));
+        return this->split(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::split#pattern"));
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by the given character
+     * @param ch The character to split on
+     * @return A Split iterator that yields each part of the split string
+     */
+    [[nodiscard]] constexpr auto split(Char ch) const noexcept -> Split
+    {
+        return this->make_split(pattern_holder::from_char(ch), true, false, 0, false, false);
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by the given character
+     * @param ch The character to split on, interpreted as its numeric value in `[0, 255]`
+     * @return A Split iterator that yields each part of the split string
+     */
+    [[nodiscard]] constexpr auto split(char ch) const noexcept -> Split
+    {
+        return this->split(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by the pattern, from the right
+     * @param pattern The pattern to split on
+     * @return A Split iterator that yields each part in reverse order
+     */
+    [[nodiscard]] constexpr auto rsplit(const str& pattern) const noexcept -> Split
+    {
+        return this->make_split(pattern_holder::from_str(pattern), true, false, 0, true, false);
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by the pattern, from the right
+     * @param pattern The pattern to split on
+     * @return A Split iterator that yields each part in reverse order
+     */
+    template<typename Alloc>
+    [[nodiscard]] constexpr auto rsplit(const raw::String<Alloc>& pattern) const noexcept -> Split
+    {
+        return this->rsplit(pattern.as_str());
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by the pattern, from the right
+     * @param pattern The pattern to split on
+     * @return A Split iterator that yields each part in reverse order
+     * @note Panics if the pattern is not a valid UTF-8 sequence
+     */
+    [[nodiscard]] auto rsplit(const char* pattern) const noexcept -> Split
+    {
+        return this->rsplit(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::rsplit#pattern"));
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by the character, from the right
+     * @param ch The character to split on
+     * @return A Split iterator that yields each part in reverse order
+     */
+    [[nodiscard]] constexpr auto rsplit(Char ch) const noexcept -> Split
+    {
+        return this->make_split(pattern_holder::from_char(ch), true, false, 0, true, false);
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by the character, from the right
+     * @param ch The character to split on, interpreted as its numeric value in `[0, 255]`
+     * @return A Split iterator that yields each part in reverse order
+     */
+    [[nodiscard]] constexpr auto rsplit(char ch) const noexcept -> Split
+    {
+        return this->rsplit(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by the pattern into at most `n` parts
+     * @param n The maximum number of parts; the last part holds the remainder
+     * @param pattern The pattern to split on
+     * @return A Split iterator that yields at most `n` parts
+     */
+    [[nodiscard]] constexpr auto splitn(size_t n, const str& pattern) const noexcept -> Split
+    {
+        return this->make_split(pattern_holder::from_str(pattern), true, true, n, false, false);
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by the pattern into at most `n` parts
+     * @param n The maximum number of parts; the last part holds the remainder
+     * @param pattern The pattern to split on
+     * @return A Split iterator that yields at most `n` parts
+     */
+    template<typename Alloc>
+    [[nodiscard]] constexpr auto splitn(size_t n, const raw::String<Alloc>& pattern) const noexcept -> Split
+    {
+        return this->splitn(n, pattern.as_str());
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by the pattern into at most `n` parts
+     * @param n The maximum number of parts; the last part holds the remainder
+     * @param pattern The pattern to split on
+     * @return A Split iterator that yields at most `n` parts
+     * @note Panics if the pattern is not a valid UTF-8 sequence
+     */
+    [[nodiscard]] auto splitn(size_t n, const char* pattern) const noexcept -> Split
+    {
+        return this->splitn(n, str::from(pattern).expect("Invalid UTF-8 sequence while calling str::splitn#pattern"));
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by the character into at most `n` parts
+     * @param n The maximum number of parts; the last part holds the remainder
+     * @param ch The character to split on
+     * @return A Split iterator that yields at most `n` parts
+     */
+    [[nodiscard]] constexpr auto splitn(size_t n, Char ch) const noexcept -> Split
+    {
+        return this->make_split(pattern_holder::from_char(ch), true, true, n, false, false);
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by the character into at most `n` parts
+     * @param n The maximum number of parts; the last part holds the remainder
+     * @param ch The character to split on, interpreted as its numeric value in `[0, 255]`
+     * @return A Split iterator that yields at most `n` parts
+     */
+    [[nodiscard]] constexpr auto splitn(size_t n, char ch) const noexcept -> Split
+    {
+        return this->splitn(n, Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by the pattern into at most `n` parts, from the right
+     * @param n The maximum number of parts; the last part holds the remainder
+     * @param pattern The pattern to split on
+     * @return A Split iterator that yields at most `n` parts in reverse order
+     */
+    [[nodiscard]] constexpr auto rsplitn(size_t n, const str& pattern) const noexcept -> Split
+    {
+        return this->make_split(pattern_holder::from_str(pattern), true, true, n, true, false);
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by the pattern into at most `n` parts, from the right
+     * @param n The maximum number of parts; the last part holds the remainder
+     * @param pattern The pattern to split on
+     * @return A Split iterator that yields at most `n` parts in reverse order
+     */
+    template<typename Alloc>
+    [[nodiscard]] constexpr auto rsplitn(size_t n, const raw::String<Alloc>& pattern) const noexcept -> Split
+    {
+        return this->rsplitn(n, pattern.as_str());
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by the pattern into at most `n` parts, from the right
+     * @param n The maximum number of parts; the last part holds the remainder
+     * @param pattern The pattern to split on
+     * @return A Split iterator that yields at most `n` parts in reverse order
+     * @note Panics if the pattern is not a valid UTF-8 sequence
+     */
+    [[nodiscard]] auto rsplitn(size_t n, const char* pattern) const noexcept -> Split
+    {
+        return this->rsplitn(n, str::from(pattern).expect("Invalid UTF-8 sequence while calling str::rsplitn#pattern"));
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by the character into at most `n` parts, from the right
+     * @param n The maximum number of parts; the last part holds the remainder
+     * @param ch The character to split on
+     * @return A Split iterator that yields at most `n` parts in reverse order
+     */
+    [[nodiscard]] constexpr auto rsplitn(size_t n, Char ch) const noexcept -> Split
+    {
+        return this->make_split(pattern_holder::from_char(ch), true, true, n, true, false);
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by the character into at most `n` parts, from the right
+     * @param n The maximum number of parts; the last part holds the remainder
+     * @param ch The character to split on, interpreted as its numeric value in `[0, 255]`
+     * @return A Split iterator that yields at most `n` parts in reverse order
+     */
+    [[nodiscard]] constexpr auto rsplitn(size_t n, char ch) const noexcept -> Split
+    {
+        return this->rsplitn(n, Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string like `split`, dropping a trailing empty part
+     * @param pattern The pattern to split on
+     * @return A Split iterator without a trailing empty piece
+     */
+    [[nodiscard]] constexpr auto split_terminator(const str& pattern) const noexcept -> Split
+    {
+        return this->make_split(pattern_holder::from_str(pattern), false, false, 0, false, false);
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string like `split`, dropping a trailing empty part
+     * @param pattern The pattern to split on
+     * @return A Split iterator without a trailing empty piece
+     */
+    template<typename Alloc>
+    [[nodiscard]] constexpr auto split_terminator(const raw::String<Alloc>& pattern) const noexcept -> Split
+    {
+        return this->split_terminator(pattern.as_str());
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string like `split`, dropping a trailing empty part
+     * @param pattern The pattern to split on
+     * @return A Split iterator without a trailing empty piece
+     * @note Panics if the pattern is not a valid UTF-8 sequence
+     */
+    [[nodiscard]] auto split_terminator(const char* pattern) const noexcept -> Split
+    {
+        return this->split_terminator(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::split_terminator#pattern"));
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string like `split`, dropping a trailing empty part
+     * @param ch The character to split on
+     * @return A Split iterator without a trailing empty piece
+     */
+    [[nodiscard]] constexpr auto split_terminator(Char ch) const noexcept -> Split
+    {
+        return this->make_split(pattern_holder::from_char(ch), false, false, 0, false, false);
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string like `split`, dropping a trailing empty part
+     * @param ch The character to split on, interpreted as its numeric value in `[0, 255]`
+     * @return A Split iterator without a trailing empty piece
+     */
+    [[nodiscard]] constexpr auto split_terminator(char ch) const noexcept -> Split
+    {
+        return this->split_terminator(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string like `rsplit`, dropping a leading empty part
+     * @param pattern The pattern to split on
+     * @return A Split iterator without a leading empty piece, in reverse order
+     */
+    [[nodiscard]] constexpr auto rsplit_terminator(const str& pattern) const noexcept -> Split
+    {
+        return this->make_split(pattern_holder::from_str(pattern), false, false, 0, true, false);
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string like `rsplit`, dropping a leading empty part
+     * @param pattern The pattern to split on
+     * @return A Split iterator without a leading empty piece, in reverse order
+     */
+    template<typename Alloc>
+    [[nodiscard]] constexpr auto rsplit_terminator(const raw::String<Alloc>& pattern) const noexcept -> Split
+    {
+        return this->rsplit_terminator(pattern.as_str());
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string like `rsplit`, dropping a leading empty part
+     * @param pattern The pattern to split on
+     * @return A Split iterator without a leading empty piece, in reverse order
+     * @note Panics if the pattern is not a valid UTF-8 sequence
+     */
+    [[nodiscard]] auto rsplit_terminator(const char* pattern) const noexcept -> Split
+    {
+        return this->rsplit_terminator(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::rsplit_terminator#pattern"));
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string like `rsplit`, dropping a leading empty part
+     * @param ch The character to split on
+     * @return A Split iterator without a leading empty piece, in reverse order
+     */
+    [[nodiscard]] constexpr auto rsplit_terminator(Char ch) const noexcept -> Split
+    {
+        return this->make_split(pattern_holder::from_char(ch), false, false, 0, true, false);
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string like `rsplit`, dropping a leading empty part
+     * @param ch The character to split on, interpreted as its numeric value in `[0, 255]`
+     * @return A Split iterator without a leading empty piece, in reverse order
+     */
+    [[nodiscard]] constexpr auto rsplit_terminator(char ch) const noexcept -> Split
+    {
+        return this->rsplit_terminator(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string, keeping each separator on the part it terminates
+     * @param pattern The pattern to split on
+     * @return A Split iterator whose parts include their trailing separator
+     */
+    [[nodiscard]] constexpr auto split_inclusive(const str& pattern) const noexcept -> Split
+    {
+        return this->make_split(pattern_holder::from_str(pattern), false, false, 0, false, true);
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string, keeping each separator on the part it terminates
+     * @param pattern The pattern to split on
+     * @return A Split iterator whose parts include their trailing separator
+     */
+    template<typename Alloc>
+    [[nodiscard]] constexpr auto split_inclusive(const raw::String<Alloc>& pattern) const noexcept -> Split
+    {
+        return this->split_inclusive(pattern.as_str());
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string, keeping each separator on the part it terminates
+     * @param pattern The pattern to split on
+     * @return A Split iterator whose parts include their trailing separator
+     * @note Panics if the pattern is not a valid UTF-8 sequence
+     */
+    [[nodiscard]] auto split_inclusive(const char* pattern) const noexcept -> Split
+    {
+        return this->split_inclusive(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::split_inclusive#pattern"));
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string, keeping each separator on the part it terminates
+     * @param ch The character to split on
+     * @return A Split iterator whose parts include their trailing separator
+     */
+    [[nodiscard]] constexpr auto split_inclusive(Char ch) const noexcept -> Split
+    {
+        return this->make_split(pattern_holder::from_char(ch), false, false, 0, false, true);
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string, keeping each separator on the part it terminates
+     * @param ch The character to split on, interpreted as its numeric value in `[0, 255]`
+     * @return A Split iterator whose parts include their trailing separator
+     */
+    [[nodiscard]] constexpr auto split_inclusive(char ch) const noexcept -> Split
+    {
+        return this->split_inclusive(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string in reverse, keeping each separator on the part it terminates
+     * @param pattern The pattern to split on
+     * @return A Split iterator whose parts include their trailing separator, in reverse order
+     */
+    [[nodiscard]] constexpr auto rsplit_inclusive(const str& pattern) const noexcept -> Split
+    {
+        return this->make_split(pattern_holder::from_str(pattern), false, false, 0, true, true);
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string in reverse, keeping each separator on the part it terminates
+     * @param pattern The pattern to split on
+     * @return A Split iterator whose parts include their trailing separator, in reverse order
+     */
+    template<typename Alloc>
+    [[nodiscard]] constexpr auto rsplit_inclusive(const raw::String<Alloc>& pattern) const noexcept -> Split
+    {
+        return this->rsplit_inclusive(pattern.as_str());
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string in reverse, keeping each separator on the part it terminates
+     * @param pattern The pattern to split on
+     * @return A Split iterator whose parts include their trailing separator, in reverse order
+     * @note Panics if the pattern is not a valid UTF-8 sequence
+     */
+    [[nodiscard]] auto rsplit_inclusive(const char* pattern) const noexcept -> Split
+    {
+        return this->rsplit_inclusive(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::rsplit_inclusive#pattern"));
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string in reverse, keeping each separator on the part it terminates
+     * @param ch The character to split on
+     * @return A Split iterator whose parts include their trailing separator, in reverse order
+     */
+    [[nodiscard]] constexpr auto rsplit_inclusive(Char ch) const noexcept -> Split
+    {
+        return this->make_split(pattern_holder::from_char(ch), false, false, 0, true, true);
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string in reverse, keeping each separator on the part it terminates
+     * @param ch The character to split on, interpreted as its numeric value in `[0, 255]`
+     * @return A Split iterator whose parts include their trailing separator, in reverse order
+     */
+    [[nodiscard]] constexpr auto rsplit_inclusive(char ch) const noexcept -> Split
+    {
+        return this->rsplit_inclusive(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
+    }
+
+    /**
+     * @brief Splits the string at the first occurrence of the pattern
+     * @param pattern The pattern to search for
+     * @return Some containing the parts before and after the pattern, or None if the pattern is
+     *         not found
+     */
+    [[nodiscard]] constexpr auto split_once(const str& pattern) const noexcept -> Option<std::pair<str, str>>
+    {
+        if (pattern.m_len == 0)
+        {
+            return std::pair<str, str>{ str(this->m_data, 0), *this };
+        }
+
+        const auto found = this->find(pattern);
+        if (found.is_none())
+        {
+            return None{};
+        }
+
+        const auto index = found.unwrap();
+
+        return std::pair<str, str>{
+            str(this->m_data, index),
+            str(this->m_data + index + pattern.m_len, this->m_len - index - pattern.m_len)
+        };
+    }
+
+    /**
+     * @brief Splits the string at the first occurrence of the pattern
+     * @param pattern The pattern to search for
+     * @return Some containing the parts before and after the pattern, or None if the pattern is
+     *         not found
+     */
+    template<typename Alloc>
+    [[nodiscard]] constexpr auto split_once(const raw::String<Alloc>& pattern) const noexcept -> Option<std::pair<str, str>>
+    {
+        return this->split_once(pattern.as_str());
+    }
+
+    /**
+     * @brief Splits the string at the first occurrence of the pattern
+     * @param pattern The pattern to search for
+     * @return Some containing the parts before and after the pattern, or None if the pattern is
+     *         not found
+     * @note Panics if the pattern is not a valid UTF-8 sequence
+     */
+    [[nodiscard]] constexpr auto split_once(const char* pattern) const noexcept -> Option<std::pair<str, str>>
+    {
+        return this->split_once(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::split_once#pattern"));
+    }
+
+    /**
+     * @brief Splits the string at the first occurrence of the given character
+     * @param ch The character to search for
+     * @return Some containing the parts before and after the character, or None if it is not found
+     */
+    [[nodiscard]] constexpr auto split_once(Char ch) const noexcept -> Option<std::pair<str, str>>
+    {
+        std::byte buffer[4];
+
+        return this->split_once(str::char_pattern(ch, buffer));
+    }
+
+    /**
+     * @brief Splits the string at the first occurrence of the given character
+     * @param ch The character to search for, interpreted as its numeric value in `[0, 255]`
+     * @return Some containing the parts before and after the character, or None if it is not found
+     */
+    [[nodiscard]] constexpr auto split_once(char ch) const noexcept -> Option<std::pair<str, str>>
+    {
+        return this->split_once(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
+    }
+
+    /**
+     * @brief Splits the string at the last occurrence of the pattern
+     * @param pattern The pattern to search for
+     * @return Some containing the parts before and after the pattern, or None if the pattern is
+     *         not found
+     */
+    [[nodiscard]] constexpr auto rsplit_once(const str& pattern) const noexcept -> Option<std::pair<str, str>>
+    {
+        if (pattern.m_len == 0)
+        {
+            return std::pair<str, str>{ *this, str(this->m_data + this->m_len, 0) };
+        }
+
+        const auto found = this->rfind(pattern);
+        if (found.is_none())
+        {
+            return None{};
+        }
+
+        const auto index = found.unwrap();
+
+        return std::pair<str, str>{
+            str(this->m_data, index),
+            str(this->m_data + index + pattern.m_len, this->m_len - index - pattern.m_len)
+        };
+    }
+
+    /**
+     * @brief Splits the string at the last occurrence of the pattern
+     * @param pattern The pattern to search for
+     * @return Some containing the parts before and after the pattern, or None if the pattern is
+     *         not found
+     */
+    template<typename Alloc>
+    [[nodiscard]] constexpr auto rsplit_once(const raw::String<Alloc>& pattern) const noexcept -> Option<std::pair<str, str>>
+    {
+        return this->rsplit_once(pattern.as_str());
+    }
+
+    /**
+     * @brief Splits the string at the last occurrence of the pattern
+     * @param pattern The pattern to search for
+     * @return Some containing the parts before and after the pattern, or None if the pattern is
+     *         not found
+     * @note Panics if the pattern is not a valid UTF-8 sequence
+     */
+    [[nodiscard]] constexpr auto rsplit_once(const char* pattern) const noexcept -> Option<std::pair<str, str>>
+    {
+        return this->rsplit_once(str::from(pattern).expect("Invalid UTF-8 sequence while calling str::rsplit_once#pattern"));
+    }
+
+    /**
+     * @brief Splits the string at the last occurrence of the given character
+     * @param ch The character to search for
+     * @return Some containing the parts before and after the character, or None if it is not found
+     */
+    [[nodiscard]] constexpr auto rsplit_once(Char ch) const noexcept -> Option<std::pair<str, str>>
+    {
+        std::byte buffer[4];
+
+        return this->rsplit_once(str::char_pattern(ch, buffer));
+    }
+
+    /**
+     * @brief Splits the string at the last occurrence of the given character
+     * @param ch The character to search for, interpreted as its numeric value in `[0, 255]`
+     * @return Some containing the parts before and after the character, or None if it is not found
+     */
+    [[nodiscard]] constexpr auto rsplit_once(char ch) const noexcept -> Option<std::pair<str, str>>
+    {
+        return this->rsplit_once(Char(static_cast<std::uint32_t>(static_cast<std::uint8_t>(ch))));
     }
 
     /**
@@ -1856,6 +4407,15 @@ public:
     [[nodiscard]] constexpr auto split_ascii_whitespace() const noexcept -> SplitASCIIWhiteSpace
     {
        return SplitASCIIWhiteSpace(*this);
+    }
+
+    /**
+     * @brief Returns an iterator that splits the string by runs of Unicode whitespace
+     * @return A SplitWhitespace iterator that yields each non-empty part of the split string
+     */
+    [[nodiscard]] auto split_whitespace() const noexcept -> SplitWhitespace
+    {
+        return SplitWhitespace(*this);
     }
 
     /**
@@ -2021,7 +4581,7 @@ public:
             }
         }
         this->m_len = i;
-        this->m_data[i + 1] = std::byte{0};
+        this->m_data[i] = std::byte{0};
 
         if (!is_valid_utf8(this->m_data, this->m_len))
         {
@@ -2051,8 +4611,9 @@ public:
             return result.unwrap_err();
         }
 
-        pointer data = std::allocator_traits<Alloc>::allocate(alloc_copy, len);
+        pointer data = std::allocator_traits<Alloc>::allocate(alloc_copy, len + 1);
         std::copy(str, str + len, std::bit_cast<char*>(data));
+        data[len] = std::byte{0};
 
         return String(alloc_copy, data, len, len);
     }
@@ -2151,6 +4712,10 @@ public:
     constexpr auto clear() noexcept -> void
     {
         this->m_len = 0;
+        if (this->m_data != nullptr)
+        {
+            this->m_data[0] = std::byte{0};
+        }
     }
 
     /**
@@ -2299,14 +4864,14 @@ public:
      */
     auto split_off(size_t at) -> String
     {
-        if (at >= this->m_len)
+        if (at > this->m_len)
         {
             panic("Split index out of bounds");
         }
 
         // Verify that 'at' is on a UTF-8 code point boundary
-        if (!is_valid_utf8(this->m_data, at) ||
-            !is_valid_utf8(this->m_data + at, this->m_len - at))
+        if (this->m_len > 0 &&
+            (!is_valid_utf8(this->m_data, at) || !is_valid_utf8(this->m_data + at, this->m_len - at)))
         {
             panic("Split index not on UTF-8 code point boundary");
         }
@@ -2316,16 +4881,22 @@ public:
         result.reserve(this->m_len - at);
 
         // Copy the bytes [at, len) to the new string
-        std::copy(this->m_data + at,
-                 this->m_data + this->m_len,
-                 result.m_data);
-        result.m_len = this->m_len - at;
-        // Add null terminator to the new string
-        result.m_data[result.m_len] = std::byte{0};
+        if (this->m_len > at)
+        {
+            std::copy(this->m_data + at,
+                     this->m_data + this->m_len,
+                     result.m_data);
+            result.m_len = this->m_len - at;
+            // Add null terminator to the new string
+            result.m_data[result.m_len] = std::byte{0};
+        }
 
         // Update this string's length and add null terminator
         this->m_len = at;
-        this->m_data[this->m_len] = std::byte{0};
+        if (this->m_data != nullptr)
+        {
+            this->m_data[this->m_len] = std::byte{0};
+        }
 
         return result;
     }
@@ -2401,8 +4972,11 @@ public:
 
     auto operator=(const String& other) -> String&
     {
-        this->clear();
-        (*this) += other;
+        if (this != &other)
+        {
+            this->clear();
+            (*this) += other;
+        }
 
         return *this;
     }
@@ -2628,16 +5202,58 @@ template<typename Alloc = std::allocator<std::byte>>
     return rhs == lhs;
 }
 
-namespace literal
+[[nodiscard]] constexpr auto operator==(const str& lhs, const std::string_view& rhs) noexcept -> bool
 {
-    [[nodiscard]] auto operator""_s(const char* str, size_t) noexcept -> crab_cpp::str
+    if (lhs.size() != rhs.size())
     {
-        return str::from(str).expect("Invalid UTF-8 sequence while calling operator\"\"_s");
+        return false;
+    }
+    return std::equal((lhs.data()), lhs.data() + lhs.size(), reinterpret_cast<const std::byte*>(rhs.data()));
+}
+
+[[nodiscard]] constexpr auto operator==(const std::string_view& lhs, const str& rhs) noexcept -> bool
+{
+    return rhs == lhs;
+}
+
+/**
+ * @brief Explicit specialization of `parse` for `bool`
+ * @details `std::from_chars` has no `bool` overload, so the generic
+ *          implementation does not compile for `bool` even though `bool`
+ *          satisfies the primary template's `std::integral` constraint. This
+ *          specialization accepts exactly `"true"` or `"false"` (matching
+ *          Rust's `str::parse::<bool>()`), reusing `operator==`, and reports
+ *          `std::errc::invalid_argument` for anything else.
+ * @return A Result containing either the parsed bool or a std::from_chars_result
+ */
+template<>
+constexpr auto str::parse<bool>() const noexcept -> Result<bool, std::from_chars_result>
+{
+    if (*this == "true")
+    {
+        return true;
     }
 
-    [[nodiscard]] auto operator""_S(const char* str, size_t) -> String
+    if (*this == "false")
     {
-        return String::from(str).ok().expect_take("Invalid UTF-8 sequence while calling operator\"\"_S");
+        return false;
+    }
+
+    return std::from_chars_result{this->as_raw(), std::errc::invalid_argument};
+}
+
+namespace literal
+{
+    [[nodiscard]] auto operator""_s(const char* str, size_t len) noexcept -> crab_cpp::str
+    {
+        // Use the length the compiler provides rather than strlen, so literals
+        // containing embedded NUL bytes are not silently truncated.
+        return str::from_raw_parts(str, len).expect("Invalid UTF-8 sequence while calling operator\"\"_s");
+    }
+
+    [[nodiscard]] auto operator""_S(const char* str, size_t len) -> String
+    {
+        return String::from_raw_parts(str, len).ok().expect_take("Invalid UTF-8 sequence while calling operator\"\"_S");
     }
 }
 
@@ -2687,9 +5303,12 @@ struct std::formatter<crab_cpp::Char> : std::formatter<std::uint32_t>
 
 export auto operator<<(std::ostream& os, const crab_cpp::Char& ch) -> std::ostream&
 {
-    const std::ios_base::fmtflags original_base = std::cout.flags() & std::ios_base::basefield;
+    // Save/restore the flags of the stream actually being written to. The
+    // previous implementation read from (and restored) `std::cout`, which
+    // leaked `std::hex` onto any other stream (e.g. a std::ostringstream).
+    const std::ios_base::fmtflags original_flags = os.flags();
     os << std::hex << "u" << ch.code_point();
-    std::cout.flags(original_base);
+    os.flags(original_flags);
 
     return os;
 }

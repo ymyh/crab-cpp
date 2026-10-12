@@ -11,6 +11,42 @@ using None = std::monostate;
 template<typename T>
 struct Option;
 
+namespace internal
+{
+    /**
+     * @brief Checks whether T is a tuple-like type with at least one element
+     */
+    template<typename T>
+    concept tuple_like = requires
+    {
+        typename std::tuple_element_t<0, std::remove_cvref_t<T>>;
+    };
+
+    /**
+     * @brief Checks whether T is a tuple-like type with exactly two elements
+     */
+    template<typename T>
+    concept tuple_of_size_2 = tuple_like<T> && (std::tuple_size_v<std::remove_cvref_t<T>> == 2);
+
+    /**
+     * @brief Option type of the first element of a two-element tuple-like T
+     */
+    template<typename T>
+    using unzip_first = Option<std::tuple_element_t<0, std::remove_cvref_t<T>>>;
+
+    /**
+     * @brief Option type of the second element of a two-element tuple-like T
+     */
+    template<typename T>
+    using unzip_second = Option<std::tuple_element_t<1, std::remove_cvref_t<T>>>;
+
+    /**
+     * @brief Result type of Option<T>::unzip
+     */
+    template<typename T>
+    using unzip_result = std::tuple<unzip_first<T>, unzip_second<T>>;
+}
+
 /**
  * @brief Option type that can hold either a value of type T or None
  * @tparam T The type of value that can be held in the Option
@@ -27,6 +63,23 @@ struct Option<T> : std::variant<None, T>
     using type = T;
 
     /**
+     * @brief Returns the option if it contains a value, otherwise returns the provided option
+     * @param optb The option to return if this option is None
+     * @return The original option if it contains a value, otherwise optb
+     */
+    template<typename U>
+        requires (std::move_constructible<U> && !std::is_pointer_v<U> && !std::is_reference_v<U>)
+    [[nodiscard]] auto and_(const Option<U>& optb) noexcept -> Option<U>
+    {
+        if (this->is_some())
+        {
+            return optb;
+        }
+
+        return None{};
+    }
+
+    /**
      * @brief Returns None if the option is None, otherwise calls f with the wrapped value and returns the result
      * @tparam Self The type of self
      * @tparam F The type of the function to call
@@ -35,11 +88,11 @@ struct Option<T> : std::variant<None, T>
      * @return Option containing the result of f if Some, None otherwise
      */
     template<typename Self, typename F, typename U = typename std::invoke_result_t<F, T&>>
-        requires requires (F f, T &t)
+        requires requires (F f, T& t)
         {
             { f(t) } -> std::same_as<Option<typename U::type>>;
         }
-    auto and_then(this Self&& self, F&& f) -> Option<typename U::type>
+    [[nodiscard]] auto and_then(this Self&& self, F&& f) -> Option<typename U::type>
     {
         if (self.is_some())
         {
@@ -55,7 +108,7 @@ struct Option<T> : std::variant<None, T>
      * @return The contained value
      * @note Panics if the value is None
      */
-    auto expect_take(std::string_view msg) -> T
+    [[nodiscard]] auto expect_take(std::string_view msg) -> T
     {
         if (this->index() == 1)
         {
@@ -76,7 +129,7 @@ struct Option<T> : std::variant<None, T>
      * @note Panics if the value is None
      */
     template<typename Self>
-    auto expect(this Self&& self, std::string_view msg) -> decltype(auto)
+    [[nodiscard]] auto expect(this Self&& self, std::string_view msg) -> decltype(auto)
     {
         if (self.index() == 1)
         {
@@ -136,7 +189,7 @@ struct Option<T> : std::variant<None, T>
         {
             { f(t) } -> std::same_as<U>;
         }
-    auto map(this Self&& self, F&& f) -> Option<U>
+    [[nodiscard]] auto map(this Self&& self, F&& f) -> Option<U>
     {
         if (self.is_some())
         {
@@ -162,7 +215,7 @@ struct Option<T> : std::variant<None, T>
             { f(t) } -> std::same_as<U>;
             { d() } -> std::same_as<U>;
         }
-    auto map_or_else(this Self&& self, F&& f, D&& d) -> Option<U>
+    [[nodiscard]] auto map_or_else(this Self&& self, D&& d, F&& f) -> U
     {
         if (self.is_some())
         {
@@ -170,6 +223,21 @@ struct Option<T> : std::variant<None, T>
         }
 
         return d();
+    }
+
+    /**
+     * @brief Returns the option if it contains a value, otherwise returns the provided option
+     * @param optb The option to return if this option is None
+     * @return The original option if it contains a value, otherwise optb
+     */
+    [[nodiscard]] auto or_(const Option<T>& optb) noexcept -> Option<T>
+    {
+        if (this->is_some())
+        {
+            return *this;
+        }
+
+        return optb;
     }
 
     /**
@@ -196,7 +264,7 @@ struct Option<T> : std::variant<None, T>
      * @return The contained value
      * @note Panics if the value is None
      */
-    auto take() noexcept -> T
+    [[nodiscard]] auto take() noexcept -> T
     {
         return this->expect_take("Calling Option<T>::take() on a None value");
     }
@@ -209,7 +277,7 @@ struct Option<T> : std::variant<None, T>
      */
     template<typename P>
         requires (std::invocable<P, T&> && std::is_same_v<std::invoke_result_t<P, T&>, bool>)
-    auto take_if(P&& pred) -> Option<T>
+    [[nodiscard]] auto take_if(P&& pred) -> Option<T>
     {
         if (this->is_some() && std::invoke(pred, std::get<1>(*this)))
         {
@@ -288,6 +356,35 @@ struct Option<T> : std::variant<None, T>
     {
         return (std::get<1>(self));
     }
+
+    /**
+     * @brief Unzips an option containing a two-element tuple
+     * If self is Some((a, b)) this method returns (Some(a), Some(b)). Otherwise, (None, None) is returned.
+     * @tparam U The contained type, deduced from T; only available when it is a
+     *         tuple-like type with exactly two elements
+     * @return A tuple holding an Option for each element
+     */
+    template<typename U = T>
+        requires internal::tuple_of_size_2<U>
+    [[nodiscard]] auto unzip() noexcept -> internal::unzip_result<U>
+    {
+        using first_type = std::tuple_element_t<0, std::remove_cvref_t<U>>;
+        using second_type = std::tuple_element_t<1, std::remove_cvref_t<U>>;
+
+        if (this->is_some())
+        {
+            auto result = internal::unzip_result<U>{
+                Option<first_type>(std::forward<first_type>(std::get<0>(std::get<1>(*this)))),
+                Option<second_type>(std::forward<second_type>(std::get<1>(std::get<1>(*this))))
+            };
+
+            *this = None{};
+
+            return result;
+        }
+
+        return internal::unzip_result<U>{ Option<first_type>(None{}), Option<second_type>(None{}) };
+    }
 };
 
 /**
@@ -328,10 +425,27 @@ public:
     auto operator=(const Option<T>&) noexcept -> Option<T>& = default;
 
     /**
+     * @brief Returns the option if it contains a value, otherwise returns the provided option
+     * @param optb The option to return if this option is None
+     * @return The original option if it contains a value, otherwise optb
+     */
+    template<typename U>
+        requires std::is_pointer_v<U>
+    [[nodiscard]] auto and_(Option<U> optb) noexcept -> Option<U>
+    {
+        if (this->is_some())
+        {
+            return optb;
+        }
+
+        return None{};
+    }
+
+    /**
      * @brief Returns true if pointer is not null
      * @return true if pointer is null, false otherwise
      */
-    auto is_none() const noexcept -> bool
+    [[nodiscard]] auto is_none() const noexcept -> bool
     {
         return this->ptr == nullptr;
     }
@@ -340,7 +454,7 @@ public:
      * @brief Returns true if pointer is null
      * @return true if pointer is not null, false otherwise
      */
-    auto is_some() const noexcept -> bool
+    [[nodiscard]] auto is_some() const noexcept -> bool
     {
         return !this->is_none();
     }
@@ -353,7 +467,7 @@ public:
      * @note Panics if pointer is null
      */
     template<typename Self>
-    auto expect(this Self&& self, std::string_view msg) -> decltype(auto)
+    [[nodiscard]] auto expect(this Self&& self, std::string_view msg) -> decltype(auto)
     {
         if (self.is_some())
         {
@@ -369,7 +483,7 @@ public:
      * @return The pointer
      * @note Panics if pointer is null
      */
-    auto expect_take(std::string_view msg) -> T
+    [[nodiscard]] auto expect_take(std::string_view msg) -> T
     {
         if (this->is_some())
         {
@@ -414,7 +528,7 @@ public:
         {
             { f(t) } -> std::same_as<U>;
         }
-    auto map(this Self&& self, F&& f) -> Option<U>
+    [[nodiscard]] auto map(this Self&& self, F&& f) -> Option<U>
     {
         if (self.is_some())
         {
@@ -422,6 +536,21 @@ public:
         }
 
         return None{};
+    }
+
+    /**
+     * @brief Returns the option if it contains a value, otherwise returns the provided option
+     * @param optb The option to return if this option is None
+     * @return The original option if it contains a value, otherwise optb
+     */
+    [[nodiscard]] auto or_(Option<T> optb) noexcept -> Option<T>
+    {
+        if (this->is_some())
+        {
+            return *this;
+        }
+
+        return optb;
     }
 
     /**
@@ -448,7 +577,7 @@ public:
      * @return The contained pointer
      * @note Panics if the pointer is null
      */
-    auto take() noexcept -> T
+    [[nodiscard]] auto take() noexcept -> T
     {
         return this->expect_take("Calling Option<T>::take() on a None value");
     }
@@ -460,7 +589,7 @@ public:
      * @note Panics if pointer is null
      */
     template<typename Self>
-    auto unwrap(this Self&& self) noexcept -> decltype(auto)
+    [[nodiscard]] auto unwrap(this Self&& self) noexcept -> decltype(auto)
     {
         return self.expect("Calling Option<T>::unwrap() on a None value");
     }
@@ -472,7 +601,7 @@ public:
      * @warning This function is unsafe and may cause undefined behavior if called on null
      */
     template<typename Self>
-    auto unwrap_unchecked(this Self&& self) noexcept -> decltype(auto)
+    [[nodiscard]] auto unwrap_unchecked(this Self&& self) noexcept -> decltype(auto)
     {
         return self.ptr;
     }
@@ -516,6 +645,23 @@ public:
     auto operator=(const Option<T>&) noexcept -> Option<T>& = default;
 
     /**
+     * @brief Returns the option if it contains a value, otherwise returns the provided option
+     * @param optb The option to return if this option is None
+     * @return The original option if it contains a value, otherwise optb
+     */
+    template<typename U>
+        requires std::is_lvalue_reference_v<U>
+    [[nodiscard]] auto and_(Option<U> optb) noexcept -> Option<U>
+    {
+        if (this->is_some())
+        {
+            return optb;
+        }
+
+        return None{};
+    }
+
+    /**
      * @brief Returns reference if pointer is not null, otherwise panics
      * @tparam Self The type of self
      * @param msg The panic message to display if pointer is null
@@ -523,7 +669,7 @@ public:
      * @note Panics if pointer is null
      */
     template<typename Self>
-    auto expect(this Self&& self, std::string_view msg) -> T
+    [[nodiscard]] auto expect(this Self&& self, std::string_view msg) -> T
     {
         if (self.is_some())
         {
@@ -539,7 +685,7 @@ public:
      * @return The reference
      * @note Panics if pointer is null
      */
-    auto expect_take(std::string_view msg) -> T
+    [[nodiscard]] auto expect_take(std::string_view msg) -> T
     {
         if (this->is_some())
         {
@@ -613,6 +759,21 @@ public:
     }
 
     /**
+     * @brief Returns the option if it contains a value, otherwise returns the provided option
+     * @param optb The option to return if this option is None
+     * @return The original option if it contains a value, otherwise optb
+     */
+    [[nodiscard]] auto or_(Option<T> optb) noexcept -> Option<T>
+    {
+        if (this->is_some())
+        {
+            return *this;
+        }
+
+        return optb;
+    }
+
+    /**
      * @brief Replaces the actual value in the option by the value given in parameter
      * @param t The new reference to store
      * @return The old reference if present, None otherwise
@@ -636,7 +797,7 @@ public:
      * @return The contained reference
      * @note Panics if the reference is null
      */
-    auto take() noexcept -> T
+    [[nodiscard]] auto take() noexcept -> T
     {
         return this->expect_take("Calling Option<T>::take() on a None value");
     }
@@ -648,7 +809,7 @@ public:
      * @note Panics if pointer is null
      */
     template<typename Self>
-    constexpr auto unwrap(this Self&& self) noexcept -> decltype(auto)
+    [[nodiscard]] constexpr auto unwrap(this Self&& self) noexcept -> decltype(auto)
     {
         if (self.is_some())
         {
@@ -665,7 +826,7 @@ public:
      * @warning This function is unsafe and may cause undefined behavior if called on null
      */
     template<typename Self>
-    constexpr auto unwrap_unchecked(this Self&& self) noexcept -> decltype(auto)
+    [[nodiscard]] constexpr auto unwrap_unchecked(this Self&& self) noexcept -> decltype(auto)
     {
         return (*self.ptr);
     }
