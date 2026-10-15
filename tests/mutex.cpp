@@ -55,7 +55,7 @@ TEST(MutexTest, TryLockWhenFree)
         auto maybe = m.try_lock();
         ASSERT_TRUE(maybe.is_some());
 
-        *maybe.unwrap() = 2;
+        *maybe.as_mut().unwrap() = 2;
     }
 
     EXPECT_EQ(m.get_mut(), 2);
@@ -67,7 +67,7 @@ TEST(MutexTest, TryLockOnConstMutexWhenFree)
 
     auto maybe = m.try_lock();
     ASSERT_TRUE(maybe.is_some());
-    EXPECT_EQ(*maybe.unwrap(), 7);
+    EXPECT_EQ(*maybe.as_mut().unwrap(), 7);
 }
 
 TEST(MutexTest, TryLockWhenHeldByOtherThread)
@@ -182,7 +182,7 @@ TEST(MutexTest, TryLockUnderContention)
 
                     if (maybe.is_some())
                     {
-                        *maybe.unwrap() += 1;
+                        *maybe.as_mut().unwrap() += 1;
                         break;
                     }
 

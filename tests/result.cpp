@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 
+import std;
 import crab_cpp;
+
+#include "probe_types.h"
 
 using namespace crab_cpp;
 
@@ -146,22 +149,6 @@ TEST(ResultTest, Inspect)
     EXPECT_TRUE(ok.is_ok());
 }
 
-TEST(ResultTest, Replace)
-{
-    {
-        auto ok = Result<int, std::string>(42);
-        auto opt = ok.replace(84);
-        EXPECT_EQ(ok.unwrap(), 84);
-        EXPECT_EQ(opt.unwrap(), 42);
-    }
-
-    {
-        auto err = Result<int, std::string>("error");
-        auto opt = err.replace(84);
-        EXPECT_EQ(err.unwrap(), 84);
-        EXPECT_TRUE(opt.is_none());
-    }
-}
 
 TEST(ResultTest, AndThenTypeChange)
 {
@@ -210,3 +197,109 @@ TEST(ResultTest, MapErrTypeChange)
     EXPECT_TRUE(mapped_ok.is_ok());
     EXPECT_EQ(mapped_ok.unwrap(), 42);
 }
+
+TEST(ResultTest, ReferenceStorage)
+{
+    int value = 4;
+    auto ok = Result<int, std::string>(value);
+    auto ref = ok.as_ref();
+    static_assert(std::is_same_v<decltype(ref), Result<const int&, const std::string&>>);
+    EXPECT_EQ(ref.unwrap(), 4);
+
+    auto mut = ok.as_mut();
+    static_assert(std::is_same_v<decltype(mut), Result<int&, std::string&>>);
+    mut.unwrap() = 9;
+    EXPECT_EQ(ok.unwrap(), 9);
+    EXPECT_EQ(value, 4);
+
+    Result<int&, std::string> ref_ok(value);
+    EXPECT_EQ(ref_ok.unwrap(), 4);
+    ref_ok.unwrap() = 11;
+    EXPECT_EQ(value, 11);
+
+    Result<int&, std::string> ref_err(std::string("missing"));
+    EXPECT_TRUE(ref_err.is_err());
+    EXPECT_EQ(ref_err.unwrap_err(), "missing");
+
+    auto borrowed = Option<int&>(value).ok_or(std::string("missing"));
+    static_assert(std::is_same_v<decltype(borrowed), Result<int&, std::string>>);
+    EXPECT_EQ(borrowed.unwrap(), 11);
+
+    auto err = Result<int, std::string>("e");
+    auto err_ref = err.as_mut();
+    EXPECT_EQ(err_ref.unwrap_err(), "e");
+    err_ref.unwrap_err() += "!";
+    EXPECT_EQ(err.unwrap_err(), "e!");
+
+    auto mapped = std::move(ref_ok).map([](int& item) { return item + 1; });
+    EXPECT_EQ(mapped.unwrap(), 12);
+    EXPECT_EQ(value, 11);
+}
+
+TEST(ResultTest, MapErrInPlace)
+{
+    auto err = Result<int, std::string>("error");
+    auto mapped = err.map_err([](const std::string& e) { return static_cast<int>(e.size()); });
+    static_assert(std::is_same_v<decltype(mapped), Result<int, int>>);
+    EXPECT_TRUE(mapped.is_err());
+    EXPECT_EQ(mapped.unwrap_err(), 5);
+    EXPECT_EQ(err.unwrap_err(), "error");
+
+    auto ok = Result<std::unique_ptr<int>, std::string>(std::make_unique<int>(3));
+    auto moved = std::move(ok).map_err([](std::string) { return 0; });
+    EXPECT_EQ(*std::move(moved).unwrap(), 3);
+    EXPECT_TRUE(ok.is_ok());
+    EXPECT_EQ(ok.as_mut().unwrap(), nullptr);
+}
+
+TEST(ResultTest, Flatten)
+{
+    auto ok_ok = Result<Result<int, std::string>, std::string>(Result<int, std::string>(7));
+    EXPECT_EQ(ok_ok.flatten().unwrap(), 7);
+    EXPECT_EQ(ok_ok.unwrap().unwrap(), 7);
+
+    auto ok_err = Result<Result<int, std::string>, std::string>(Result<int, std::string>(std::string("inner")));
+    EXPECT_EQ(ok_err.flatten().unwrap_err(), "inner");
+    EXPECT_TRUE(ok_err.is_ok());
+
+    auto err = Result<Result<int, std::string>, std::string>(std::string("outer"));
+    EXPECT_EQ(err.flatten().unwrap_err(), "outer");
+    EXPECT_EQ(err.unwrap_err(), "outer");
+
+    auto nested = Result<Result<std::string, int>, int>(Result<std::string, int>(std::string("hi")));
+    auto flat = std::move(nested).flatten();
+    EXPECT_EQ(flat.unwrap(), "hi");
+    EXPECT_TRUE(nested.is_ok());
+    EXPECT_TRUE(nested.unwrap().unwrap().empty());
+
+    auto outer_err = Result<Result<std::string, std::string>, std::string>(std::string("outer"));
+    auto flat_err = std::move(outer_err).flatten();
+    EXPECT_EQ(flat_err.unwrap_err(), "outer");
+    EXPECT_TRUE(outer_err.is_err());
+    EXPECT_TRUE(outer_err.unwrap_err().empty());
+}
+
+TEST(ResultTest, UnwrapUnchecked)
+{
+    auto ok = Result<std::string, int>(std::string("hi"));
+    EXPECT_EQ(ok.unwrap_unchecked(), "hi");
+    EXPECT_EQ(ok.unwrap(), "hi");
+
+    auto consumed = std::move(ok).unwrap_unchecked();
+    EXPECT_EQ(consumed, "hi");
+    EXPECT_TRUE(ok.is_ok());
+    EXPECT_TRUE(ok.unwrap().empty());
+
+    int value = 4;
+    Result<int&, std::string> ref_ok(value);
+    EXPECT_EQ(ref_ok.unwrap_unchecked(), 4);
+    ref_ok.unwrap_unchecked() = 8;
+    EXPECT_EQ(value, 8);
+
+    const auto locked = Result<std::string, int>(std::string("stay"));
+    auto from_const_rvalue = static_cast<const Result<std::string, int>&&>(locked).unwrap_unchecked();
+    EXPECT_EQ(from_const_rvalue, "stay");
+    EXPECT_EQ(locked.unwrap(), "stay");
+}
+
+#include "result_matrix.inl"

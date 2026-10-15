@@ -114,7 +114,7 @@ if (CRAB_CPP_ENABLE_TEST)
     #    linkage, producing duplicate symbol errors for any program that uses
     #    both `import std` and std::print/std::format.
     if (MINGW)
-        target_link_libraries(crab_cpp_test PRIVATE stdc++exp)
+        target_link_libraries(crab_cpp_test PRIVATE stdc++exp pthread)
         target_link_options(crab_cpp_test PRIVATE "-Wl,--allow-multiple-definition")
     endif()
 

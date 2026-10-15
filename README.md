@@ -7,8 +7,11 @@
     - [Requirements](#requirements)
   - [Features \& Usage](#features--usage)
     - [panic \& unimplemented](#panic--unimplemented)
+    - [Value category](#value-category)
     - [Option \<T\>](#option-t)
     - [Result \<T, E\>](#result-t-e)
+    - [match](#match)
+    - [Mutex \<T\>](#mutex-t)
     - [Char \& str \& String (Optional feature)](#char--str--string-optional-feature)
   - [Why Crab\_cpp ?](#why-crab_cpp-)
   - [Thanks](#thanks)
@@ -16,7 +19,7 @@
 ## Crab_cpp: Rust-like Struct and Function in C++23
 
 ### Overview
-Crab_cpp is a C++23 library that simulates Rust's Option<T>, Result<T, E>, panic!, unimplemented!, a match macro and optional Char, str, String to modern C++. Designed for developers who appreciate Rust's explicit error handling and pattern matching but work in C++ ecosystems. This library supports only C++23 and depends on std module.
+Crab_cpp is a C++23 library that brings Rust-like `Option<T>`, `Result<T, E>`, `panic` / `unimplemented`, a `match` macro, `Mutex<T>`, and optional `Char` / `str` / `String` to modern C++. It is for code that wants explicit error handling and pattern matching while staying in C++. The library is C++23 only and is used through `import std` and `import crab_cpp`.
 
 ### Compilation
 Currently, we use cmake or [xmake](https://github.com/xmake-io/xmake) to compile this library. Welcome to contribute if you need more build systems.
@@ -92,8 +95,7 @@ clang >= 19 / clang-cl >= 19.1.1
 ### Features & Usage
 
 #### panic & unimplemented
-Prints a message and calls std::terminate().
-- If the macro `CRAB_CPP_ENABLE_BACKTRACE` is defined, it will print std::stacktrace::current()
+`panic` prints `Panic encountered` to `std::cerr` and calls `std::terminate`. `unimplemented` prints `Unimplemented yet.` and then panics. A `std::string_view` or a `std::format_string` may be passed as the message. When `CRAB_CPP_ENABLE_BACKTRACE` is defined, `std::stacktrace::current()` is printed before termination.
 
 ```c++
 import crab_cpp;
@@ -101,84 +103,103 @@ import crab_cpp;
 int main()
 {
     panic("Panic because answer isn't {}", 42);
-    unimplemented("Unimplemented!")
+    unimplemented("Unimplemented!");
 }
 ```
 
+#### Value category
+Methods that take `this` use the value category of the object to mean borrow or consume.
+
+- An lvalue, including a const lvalue, borrows. A callback sees `T&` or `const T&`, and the object is left unchanged. A returned value is copy-constructed.
+- A non-const rvalue consumes. A callback sees `T&&`. A reference alternative still passes an lvalue bound to the referent. `Option` then becomes `None`. `Result` stays Ok or Err: a moved-from value is left in place, and a reference alternative is not cleared.
+- A const rvalue is copied and is not cleared.
+- `inspect` always borrows and does not clear the object. An lvalue returns `*this` by reference. An rvalue returns by value, so `make().inspect(f).unwrap()` still consumes.
+
+`unwrap` returns by value. An lvalue copies. A non-const rvalue moves the value out. `expect` is the same call with your own panic message. `unwrap_unchecked` skips the check; calling it on a missing value is undefined. A reference alternative returns that reference rather than a copy of the referent.
+
 #### Option &lt;T&gt;
-Option<T> is inherited from `std::variant<None, T>`, add few more Rust-like methods, where `None` is alias for `std::monostate`.
-It features two specialized variants, one holding lvalue references, another containing pointers. Both maintaining sizeof(size_t) memory footprint for optimal compatibility.
+`Option<T>` holds either a `T` or `None`. `None` is an alias of `std::monostate`. It is not a subclass of `std::variant`. A value is stored in `std::variant<None, T>`. A pointer or an lvalue reference is stored as one pointer, so `sizeof(Option<T*>)` and `sizeof(Option<T&>)` equal `sizeof(std::size_t)`. A null pointer is `None`: `Option` cannot represent `Some(nullptr)`. A pointer passed to a callback is copied, so the callback does not refer to the pointer stored inside the option. A reference option binds an lvalue only. A temporary is rejected, so the stored address cannot refer to a temporary that has already died. `T` must be move-constructible when it is neither a pointer nor an lvalue reference. Rvalue references are not supported.
 
 ```c++
 import crab_cpp;
 
 #include <assert.h>
-
-// For the pattern matching macro
-#include "crab_cpp/include/macros.h"
+#include "crab_cpp/macros.h"
 
 int main()
 {
-    // Option<int> is a subclass of std::variant<std::monostate, int>
     Option<int> opt = 42;
     assert(opt.is_some());
 
-    // unwrap() returns int&
+    // Lvalue unwrap copies. opt is still Some.
     int num = opt.unwrap();
 
-    // run the lambda if present
-    opt.inspect([](int x)
-    {
-        // Do something...
-    });
+    opt.inspect([](int x) { });
 
-    // map to Option<double>
-    auto opt2 = opt.map([](int a) -> Option<double>
-    {
-        return 3.14;
-    });
+    // map's callback returns U. The result is Option<U>.
+    // and_then is the method whose callback returns an Option.
+    Option<int> doubled = opt.map([](int a) { return a * 2; });
+    assert(doubled.unwrap() == 84);
 
-    // take() moves int out of the Option, leaving None behind
-    num = opt.take();
+    // Non-const rvalue unwrap moves the value out and leaves None.
+    num = std::move(opt).unwrap();
     assert(opt.is_none());
 
-    // reference or pointer are specialized which has same size as size_t
-    Option<int&> opt3 = num;
+    Option<int&> ref = num;
+    ref.unwrap() = 7;
+    assert(num == 7);
 
-    match (opt3)
+    match (ref)
     {
-        [](int& x)
-        {
-            // Do something...
-        },
-
-        [](None)
-        {
-            // Do something else...
-        }
+        [](int& x) { },
+        [](None) { }
     };
 }
 ```
 
+One method stands for each family. The others differ only in which side they touch, or in how the fallback is produced.
+
+- `is_some`. `is_none` is the complement.
+- `contains` compares the contained value. A pointer option compares addresses. A reference option compares the referents.
+- `is_some_and`. `is_none_or` is the other predicate. Neither consumes the option.
+- `unwrap`, and likewise `expect` and `unwrap_unchecked`.
+- `unwrap_or`, and likewise `unwrap_or_else` and `unwrap_or_default`. These do not panic. `unwrap_or_default` needs a default-constructible `T` and is not provided for references. A reference fallback must be an lvalue.
+- `map`. The callback returns `U` and the method returns `Option<U>`. `map_or`, `map_or_else`, and `map_or_default` return `U` directly, using a fallback when the option is `None`.
+- `and_then`. The callback returns an `Option`.
+- `and_`. `Some` returns the other option. `None` returns `None`.
+- `or_`. `Some` keeps this option. `None` takes the other. `or_else` builds that other from a callback.
+- `xor_`. The result is `Some` only when exactly one side is `Some`.
+- `filter`. The predicate borrows. A non-const rvalue becomes `None` whether or not the predicate holds.
+- `inspect`.
+- `zip` pairs two `Some` values. `unzip` splits a `Some` of a two-element tuple. `flatten` collapses `Option<Option<T>>`.
+- `visit` calls the visitor with `None` or with the value, and does not clear the option.
+- `replace` swaps in a new value and returns the old one as an `Option`.
+- `insert`, and likewise `get_or_insert`, `get_or_insert_with`, and `get_or_insert_default`. Value options only, and only on an lvalue. The returned `T&` refers to the value stored in the option. Pointer and reference options do not own a `T`, so these methods are not provided. `get_or_insert_default` also requires `T` to be default-constructible.
+- `as_ref`, and `as_mut`. Value options only, lvalue only. They borrow the contained value as `Option<const T&>` or `Option<T&>`.
+- `ok_or`, and `ok_or_else`. `Some` becomes Ok. `None` becomes Err.
+- `==` and `<=>`. `None` is less than `Some`. `std::hash<Option<T>>` mixes a Some/None tag with the value hash, so `None` and `Some(0)` do not collide. References hash the referent. Pointers hash the address.
+
+An operand that is copied or moved is taken before either side is reset. Writing `std::move(opt).and_(opt)` therefore still observes the value.
+
 #### Result &lt;T, E&gt;
-Result<T, E> is inherited from `std::variant<T, E>`, add few more Rust-like methods.
+`Result<T, E>` holds either an Ok `T` or an Err `E`. It is not a subclass of `std::variant`. Values are stored in a variant. If either alternative is an lvalue reference, that side is stored as a pointer, so `Result<T&, E>`, `Result<T, E&>`, and `Result<T&, E&>` are valid. Rvalue references are not. A reference alternative binds an lvalue only. There is no empty state: after a consuming call the result is still Ok or Err.
+
+The converting constructor selects the single alternative that can be built from the argument. When `T` and `E` are the same type that constructor is ambiguous; use `std::in_place_index<0>` for Ok and `std::in_place_index<1>` for Err. Default construction is `Ok(T{})` when `T` is default-constructible and not a reference.
 
 ```c++
 import crab_cpp;
 
 #include <assert.h>
-
-// For the pattern matching macro
-#include "crab_cpp/include/macros.h"
+#include "crab_cpp/macros.h"
 
 enum class ErrType
 {
     Blocked, Timeout
-}
+};
 
-Result<int, ErrType> foo(bool b)
+Result<int, ErrType> foo(bool ok)
 {
-    if (b)
+    if (ok)
     {
         return 0;
     }
@@ -189,27 +210,68 @@ Result<int, ErrType> foo(bool b)
 int main()
 {
     auto res = foo(true);
-
     assert(res.is_ok());
 
-    // unwrap() returns int&
+    // Lvalue unwrap copies. res is still Ok.
     int num = res.unwrap();
 
-    // ok() try to moves out the value to an Option, do not use this Result anymore
+    // Lvalue ok() copies into an Option. res is still Ok.
     Option<int> opt = res.ok();
+    assert(res.is_ok());
 
     match (foo(false))
     {
-        [](int x)
-        {
-            // Do something...
-        },
-
-        [](ErrType e)
-        {
-            // Do something else...
-        }
+        [](int x) { },
+        [](ErrType e) { }
     };
+}
+```
+
+- `is_ok`. `is_err` is the complement.
+- `contains`. `contains_err` checks the error. A reference alternative compares the referent.
+- `is_ok_and`. `is_err_and` checks the error. Neither call consumes the result.
+- `unwrap`, and likewise `expect` and `unwrap_unchecked`. The error side is `unwrap_err` and `expect_err`.
+- `unwrap_or`, and likewise `unwrap_or_else` and `unwrap_or_default`. `unwrap_or_default` is not provided when `T` is a reference.
+- `map`. The callback returns the new Ok value and the error type stays `E`. `map_err` maps the error instead. `map_or` returns a plain `U`, using the fallback on Err.
+- `and_then`. The callback receives the Ok value and returns a `Result`.
+- `and_`. Ok returns the other result, so the Ok type may change. Err keeps `E`.
+- `or_`. Ok keeps `T` and the error type may change. Err returns the other result. `or_else` builds that result from the error.
+- `inspect`. `inspect_err` borrows the error. Neither call changes which alternative is held.
+- `flatten` collapses `Result<Result<U, E>, E>`.
+- `ok`. `err` is the error side. An lvalue copies into an `Option`. A non-const rvalue moves. The `Result` stays on its alternative.
+- `as_ref`, and `as_mut`. Lvalue only. They borrow whichever alternative is active.
+- `visit` calls the visitor with the Ok value or the Err value, and does not empty the result.
+- `==` and `<=>`. Ok is less than Err. `std::hash<Result<T, E>>` mixes an Ok/Err tag with the active value. References hash the referent.
+
+#### match
+The `match` macro lives in a header, because a macro cannot cross a module boundary.
+
+```c++
+#include "crab_cpp/macros.h"
+```
+
+`match (expr) { lambdas }` builds an overload set from the lambdas and visits the argument. One lambda handles each alternative, as in the `Option` and `Result` samples above. The arms must return the same type when the result is used.
+
+#### Mutex &lt;T&gt;
+`Mutex<T>` owns a `T` guarded by `std::mutex`, in the shape of Rust's `std::sync::Mutex`. It does not implement poisoning: a panic on another thread does not poison the lock. `lock` blocks and returns a `MutexGuard<T>`. `try_lock` returns `Option<MutexGuard<T>>`. The guard releases the lock when it is destroyed. `operator*` and `operator->` reach the protected value. The guard must not outlive the mutex. `into_inner` on an rvalue consumes the mutex and returns `T`. `get_mut` returns `T&` without locking; the caller must already have exclusive access.
+
+```c++
+import crab_cpp;
+
+#include <assert.h>
+
+Mutex<int> mutex{ 1 };
+{
+    auto guard = mutex.lock();
+    *guard += 1;
+}
+assert(*mutex.lock() == 2);
+
+if (auto maybe = mutex.try_lock(); maybe.is_some())
+{
+    // MutexGuard is move-only, so the Option has to be consumed.
+    auto guard = std::move(maybe).unwrap();
+    *guard = 3;
 }
 ```
 
@@ -243,7 +305,7 @@ int main()
 
     // `join_with` inside namespace `strings` are wrappers of std::views::join_with
     ss = s.split(",") | strings::join_with("\n") | std::ranges::to<String>();
-    assert(ss == "Hello\n World!");
+    assert(ss == "Hello\n world!");
 
     using namespace literal;
 

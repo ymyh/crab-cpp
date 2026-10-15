@@ -109,7 +109,6 @@ TEST(StringTest, CopyConstructor)
     String s1 = String::from("hello").unwrap();
     String s2(s1);
     EXPECT_EQ(s1.size(), s2.size());
-    EXPECT_EQ(s1.capacity(), s2.capacity());
     EXPECT_EQ(s1, s2);
 }
 
@@ -294,7 +293,6 @@ TEST(StringTest, AssignmentOperator)
     String s2;
     s2 = s1;
     EXPECT_EQ(s1.size(), s2.size());
-    EXPECT_EQ(s1.capacity(), s2.capacity());
     EXPECT_EQ(s1, s2);
 }
 

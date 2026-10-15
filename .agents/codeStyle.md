@@ -1,13 +1,13 @@
 # Code Style
 
-This document describes the code style used across `crab_cpp`. The existing
+This document describes the code style used across `module_name`. The existing
 code in `src/`, `tests/`, and `include/` is the source of truth; when in doubt,
 match the file you are editing. All rules below are mandatory for new code.
 
 ## Language and layout basics
 
 - Target **C++23** only. Use modules; do not add classic headers except the
-  global module fragment (`module;` + `#include`) and `include/crab_cpp/*.h`
+  global module fragment (`module;` + `#include`) and `include/module_name/*.h`
   for macros.
 - Indent with **4 spaces**. Never use tab characters for indentation.
 - End files with a single trailing newline. Avoid trailing whitespace.
@@ -105,13 +105,12 @@ int& ref = ...;
 ## Naming
 
 - Types (struct/class/enum/alias): `PascalCase` — `Option`, `Result`,
-  `FromUtf8Error`, `plan_str` (lowercase exception exists in current code for
-  internal helpers).
+  `FromUtf8Error`.
 - Functions and variables: `snake_case` — `is_some`, `unwrap`, `expect_take`.
 - Private data members: `m_` prefix — `m_data`, `m_len`, `m_value`.
 - Template parameters: `PascalCase` for types (`T`, `Alloc`, `Self`, `F`, `U`).
-- Namespaces: `snake_case` — `crab_cpp`, `raw`, `strings`, `literal`, `internal`.
-- Macros: `SCREAMING_SNAKE_CASE` with the `CRAB_CPP_` prefix where applicable.
+- Namespaces: `snake_case` — `module_name`, `raw`, `strings`, `literal`, `internal`.
+- Macros: `SCREAMING_SNAKE_CASE` with the `module_name_` prefix where applicable.
 
 ## Functions and declarations
 
@@ -138,24 +137,24 @@ int& ref = ...;
 - Each module starts with its module declaration, then imports:
 
 ```cpp
-export module crab_cpp:option;
+export module module_name:sub1;
 
 import std;
-import :panic;
+import :sub2;
 ```
 
-- The string module needs a global module fragment for the C header:
+- The sub1 module needs a global module fragment for the C header:
 
 ```cpp
 module;
 
 #include "utf8proc.h"
 
-export module crab_cpp:string;
+export module module_name:sub1;
 
-import :panic;
-import :option;
-import :result;
+import :sub2;
+import :sub3;
+import :sub4;
 import std;
 ```
 
@@ -163,19 +162,19 @@ import std;
   feature macros:
 
 ```cpp
-export module crab_cpp;
+export module module_name;
 
-export import :match;
-export import :panic;
-export import :option;
-export import :result;
+export import :sub1;
+export import :sub2;
+export import :sub3;
+export import :sub4;
 
-#ifdef CRAB_CPP_ENABLE_STRING
-export import :string;
+#ifdef MODULE_NAME_ENABLE_SUB5
+export import :sub5;
 #endif
 ```
 
-- Put public API in `export namespace crab_cpp { ... }`. Use nested namespaces
+- Put public API in `export namespace module_name { ... }`. Use nested namespaces
   (e.g. `raw`, `strings`, `literal`, `internal`) as the existing code does.
 
 ## Templates and concepts
@@ -208,14 +207,11 @@ auto inspect(this Self&& self, F&& f) -> Self
  */
 ```
 
-- Use `//` for short inline or section comments (`// operators`,
-  `// constructors`), as found in `string.cppm`.
-- Preprocessor directives inside function bodies are indented like the existing
-  `#ifdef CRAB_CPP_ENABLE_BACKTRACE` blocks in `panic.cppm`.
+- Use `//` for short inline or section comments.
 
 ## Tests
 
-- Tests live in `tests/*.cpp`, use GoogleTest, and `import crab_cpp;`.
+- Tests live in `tests/*.cpp`, use GoogleTest, and `import module_name;`.
 - Name test cases `TEST(SuiteName, CaseName)` with `PascalCase`, e.g.
   `TEST(OptionTest, IsSomeNone)`.
-- Use `EXPECT_*` assertions and `EXPECT_DEATH` for panic paths.
+- Use `EXPECT_*` assertions and `EXPECT_DEATH` for abort paths.

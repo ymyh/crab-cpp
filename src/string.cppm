@@ -5253,7 +5253,7 @@ namespace literal
 
     [[nodiscard]] auto operator""_S(const char* str, size_t len) -> String
     {
-        return String::from_raw_parts(str, len).ok().expect_take("Invalid UTF-8 sequence while calling operator\"\"_S");
+        return std::move(String::from_raw_parts(str, len).ok()).expect("Invalid UTF-8 sequence while calling operator\"\"_S");
     }
 }
 

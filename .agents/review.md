@@ -1,187 +1,228 @@
-# Review: `tests/str.cpp` coverage of `crab_cpp::str`
+# Review: Option / Result 值类别改动
 
-- Date: 2026-10-12
-- Scope: `tests/str.cpp` (63 test cases) vs. the public API of `str` / `Char` /
-  `literal` / `strings` in `src/string.cppm`
-- Verdict: **solid on the happy paths and most split/search edge cases, but with
-  clear blind spots**: the panic surface of `Char`/literals, null / default-constructed
-  degenerate inputs, and the whole interop surface (`std::hash`, `std::format`,
-  `operator<<`, `StringHasher`) are essentially untested.
+- Date: 2026-10-14
+- Scope: `src/option.cppm`、`src/result.cppm`，以及配套的 `src/string.cppm`、`tests/option.cpp`、`tests/result.cpp`、`tests/mutex.cpp`、`tests/string.cpp`。对照 `.agents/api_design.md`（2026-10-14 第三版，含路线 A）。
+- Verdict: **`unwrap` / `expect` 的按值返回、`Result::ok` / `err` 不再对左值偷值、`or_` 的右值重置，这几处和路线 A 一致。** 问题 1、2 已修。其余落地和文档里的「已完成」对不上：`Result::as_ref` / `as_mut` 的返回类型编不过，`Result::or_` / `or_else` 改错了类型参数，多处 `noexcept` 会把用户异常变成 `terminate`。现有测试碰不到这些路径。
 
-## What is already well covered
+## P0
 
-- Construction (`str()`, `from_raw_parts`, `from`, invalid UTF-8 → `FromUtf8Error`),
-  `_s` literal, comparisons (`==`, `<=>`, mixed `const char*` / `std::string` /
-  `raw::String`).
-- `contains` / `starts_with` / `ends_with` / `find` / `rfind` / `strip_prefix` /
-  `strip_suffix`: all 5 pattern overloads plus empty pattern, empty subject,
-  longer-than-subject, multi-byte patterns, invalid-UTF-8 `const char*` panic.
-- Full split family (`split`, `rsplit`, `splitn`, `rsplitn`, `split_terminator`,
-  `rsplit_terminator`, `split_inclusive`, `rsplit_inclusive`, `split_once`,
-  `rsplit_once`): empty pattern, trailing empties, adjacent separators,
-  non-overlapping `aaa`/`aa` semantics, multi-byte separators, most overloads.
-  The empty-pattern expectations match Rust's actual behaviour (verified against
-  `core::str` sources, incl. `split_inclusive("")` → `["", "a", "b", "c"]`).
-- Slicing: `slice` / `get` / `split_at` / `split_at_checked`, boundary and
-  off-boundary indices, `is_char_boundary`, panic paths via `EXPECT_DEATH`.
-- Trimming: ASCII vs Unicode whitespace, `trim_matches` with all pattern kinds
-  **and the predicate overload**, regression tests for past bugs.
-- Iteration: `chars`, `char_indices`, `graphemes` (combining marks), `lines`
-  (`\n`, `\r\n`, mixed, empty lines, lone `\r` mid-string), `split_whitespace`
-  vs `split_ascii_whitespace` (NBSP divergence), raw byte iteration.
-- `parse` (int/float, overflow, partial, empty, `INT_MAX` boundary), case
-  conversion (ASCII + Unicode incl. the `ß`/`ẞ` divergence, documented),
-  `escape_default` / `escape_debug` / `escape_unicode`, `replace` / `replace_n`
-  (non-overlap, no re-scan), `repeat` incl. overflow panic.
+### 1. 主模板没有 take 家族的替代 API
 
-## Missing coverage
+状态：2026-10-14 已补到主模板 `Option<T>`（`unwrap_or` / `unwrap_or_else` / `unwrap_or_default`、`ok_or` / `ok_or_else`、`filter`、`is_some_and`、`contains`）。左值拷贝、右值移出并置 `None`；`ok_or` 用 `in_place_index` 区分 Ok/Err。覆盖见 `tests/option.cpp` 的 `UnwrapOr`、`OkOr`、`Filter`、`IsSomeAnd`、`Contains`。指针/引用特化原有实现未改（问题 5、8、12 仍在）。
 
-### P0 — contract / correctness gaps
+`take` / `take_if` / `take_or_*` / `expect_take` 已从三个 `Option` 形态删除，`tests/option.cpp` 里对应用例也删了。`.agents/api_design.md` §8 步骤 5 写的是主模板、指针特化、引用特化都已补上 `unwrap_or` / `unwrap_or_else` / `unwrap_or_default`、`ok_or` / `ok_or_else`、`filter`、`map_or`、`is_some_and`、`contains`。
 
-| # | Gap | Why it matters |
-| --- | --- | --- |
-| 1 | `Char` panics on invalid scalar values: `Char(0x110000)`, `Char(0xD800)`, `Char(0xDFFF)` | `Char(std::uint32_t)` is the only validating constructor and is `explicit`ly documented to panic. Zero `EXPECT_DEATH` tests for it anywhere. |
-| 2 | `_s` literal with invalid UTF-8 | `operator""_s` calls `.expect(...)`, which calls `panic()`; `panic()` unconditionally calls `std::terminate()` (`panic.cppm` L9–32). The `noexcept` specifier is **irrelevant** to the outcome — removing it would not change anything. Verified to terminate; the single most-used API has an untested panic path. |
-| 3 | ~~`std::hash<str>` / `std::formatter<str>` reachability~~ — **refuted, see Verification** | The specializations are genuinely declared at module scope in `string.cppm` **without `export`** (L5170–5244), but importing TUs still see them. `std::format("{}", s)` and `std::unordered_set<str>` compile **and run correctly** on both clang/libstdc++ and GCC 16.2.0. What remains is only the untested-ness, not a compile failure. |
-| 4 | `StringHasher` | Exported specifically for heterogeneous unordered lookup, but has zero tests (all 5 `operator()` overloads, `is_transparent`). |
-| 5 | `operator<<` for `str` / `Char` | Not tested at all. For `Char` this hides a real quirk (see Issues below). |
-| 6 | Null / degenerate construction: `str::from(nullptr)`, `from_raw_parts(nullptr, 0)`, `from_raw_parts(nullptr, 3)` → `Err(0)`, and default-constructed `str()` (null `m_data`) across `as_bytes` / `to_std_string` / `to_string` / `parse` / `trim_ascii` / … | These branches exist in the implementation (`from_raw_parts` has an explicit `data == nullptr && len > 0` check; `trim_ascii_*` check `m_data == nullptr`) and are exactly the kind of code that regresses silently. Note `std::string(nullptr, 0)` is formally UB. |
+主模板 `Option<T>`（`src/option.cppm` 约 L101–505）实际只有原来的组合子加上 `map_or`、`or_else`、`as_ref`、`as_mut`。下面这些只出现在指针特化（约 L753 起）和引用特化（约 L1188 起）：
 
-Suggested snippets:
+| API | 主模板 | 指针特化 | 引用特化 |
+| --- | :-: | :-: | :-: |
+| `unwrap_or` / `unwrap_or_else` / `unwrap_or_default` | 无 | 有 | 有，见问题 5 |
+| `ok_or` / `ok_or_else` | 无 | 有 | 有，返回类型非法，见问题 5 |
+| `filter` / `is_some_and` / `contains` | 无 | 有 | 有 |
+| `map_or` | 有 | 有 | 有 |
 
-```cpp
-TEST(StringTest, CharInvalidScalarValuePanics)
-{
-    EXPECT_DEATH((void)Char(0x110000), "Invalid Unicode scalar value");
-    EXPECT_DEATH((void)Char(0xD800), "Invalid Unicode scalar value");
-    EXPECT_DEATH((void)Char(0xDFFF), "Invalid Unicode scalar value");
-}
+文件开头 L14–20 的注释还在讲「下面的 deduction guide 是为了 `Option::ok_or`」，后面只有 `Result` 的前向声明，没有 deduction guide，也没有 `ok_or`。这组 API 是在主模板上写了一半又丢了。
 
-TEST(StringTest, StrLiteralInvalidUtf8Panics)
-{
-    // operator""_s expects valid UTF-8; embedded C0 80 is invalid.
-    // The death comes from panic() -> std::terminate(), not from noexcept.
-    EXPECT_DEATH((void)"\xC0\x80"_s, "Invalid UTF-8 sequence");
-}
+`Option<int>` 上现在没有 `unwrap_or`，也没有 `filter`。删掉 `take_or_*` / `take_if` 之后，普通值类型没有替代写法。
 
-TEST(StringTest, StrNullPointerHandling)
-{
-    EXPECT_TRUE(str::from(nullptr).unwrap().empty());
-    EXPECT_TRUE(str::from_raw_parts(nullptr, 0).unwrap().empty());
-    EXPECT_TRUE(str::from_raw_parts(nullptr, 3).is_err());
-    EXPECT_EQ(str::from_raw_parts(nullptr, 3).unwrap_err().pos, 0u);
-}
+### 2. 右值组合子把值移走之后，Option 仍是 Some
+
+状态：2026-10-14 已修主模板。`map` / `and_then` / `map_or` / `map_or_else` 在右值回调返回后 `self = None{}`；`or_else` 先移出再置 `None`；`and_` 在右值 Some 分支丢弃内部值并置 `None`。左值路径不变。覆盖见 `tests/option.cpp` 的 `RvalueCombinatorsResetToNone`。指针/引用特化仍不消费（问题 12）。
+
+§2 / §3.3 / DP-11：右值 self 把 `T&&` 交给回调，然后 `self = None{}`。`or_`（L312–331）做了。下面这些右值分支只 `std::get<1>(std::move(self))`，没有重置：
+
+- `map` L232–234
+- `and_then` L150–152
+- `map_or` L296–298
+- `map_or_else` L264–266
+
+回调按值或按 `T&&` 取走对象之后，`std::move(opt).map(f)` 的 `opt` 仍然 `is_some()`，里面是 moved-from 的 `T`。再 `unwrap` 不会 panic，拿到的是已移走的值。回调如果只接 `const T&`，值还在，但按已拍板的规则右值路径仍然应该变成 `None`。
+
+`or_else`（L354–357）右值分支是 `return std::move(self)`，同样没有 `self = None{}`。`std::variant` 移后只保证「有效但未指定」，不是 `None`。
+
+`and_`（L121–126）右值 Some 直接返回 `optb`，self 保持 Some。值没有被移走，后状态同样不符合 DP-11。
+
+### 3. `Result::as_ref` / `as_mut` 的返回类型无法实例化
+
+```96:118:src/result.cppm
+[[nodiscard]] auto as_ref() const noexcept -> Result<const T&, const E&>
+// ...
+[[nodiscard]] auto as_mut() noexcept -> Result<T&, E&>
 ```
 
-### P1 — API surface holes
+`Result` 只有一个实现，基类是 `std::variant<T, E>`。`std::variant` 不能装引用，`Result<const T&, const E&>` / `Result<T&, E&>` 一实例化就是非法类型。
 
-| # | Gap | Notes |
-| --- | --- | --- |
-| 7 | `Char` classification family: `is_ascii_alphabetic`, `is_ascii_alphanumeric`, `is_ascii_lowercase`, `is_ascii_uppercase`, `is_ascii_control`, `is_ascii_digit`, `is_ascii_hexdigit` | 7 public predicates, zero tests. Only `is_whitespace`, `len_utf8`, `encode_utf8`, `to_ascii_*` are covered. |
-| 8 | `matches(const raw::String&)` and `rmatch_indices` overloads (`const char*`, `raw::String`, `Char`, `char`) | `rmatch_indices` is only tested with a `str` pattern (L1756). The **`Char`/`char` overloads of `matches` were added** (closing the asymmetry noted in earlier revisions), but they are still untested. |
-| 9 | U+000B VERTICAL TAB in `is_whitespace` / `split_whitespace` / `trim` | U+000B is Unicode `White_Space` (Rust: `'\u{b}'.is_whitespace() == true`) but `Char::is_whitespace` checks ASCII-ws (which excludes VT, matching Rust's `is_ascii_whitespace`) + U+0085 + Zs/Zl/Zp — VT is Cc, so it is **not** recognized. A test would document (or expose) this divergence. Same gap applies to `"\v"` in `trim()`. |
-| 10 | `lines()` with a trailing lone `\r` (`"a\r"` → `["a\r"]` per Rust docs) | The mid-string lone `\r` case is tested; the final-position case (`pos + 1 < bytes.size()` guard in `LinesIter`) is not. |
-| 11 | `rsplit_inclusive("")` and `rsplitn(n, "")` | The trickiest code path in `split_state` (`next_back_inclusive` with `allow_trailing_empty = false`, double-empty emission) is only exercised by `rsplit_terminator`/`split_inclusive` with non-empty patterns. |
-| 12 | `FromUtf8Error::pos` at a non-zero offset | Only position 0 is tested (`{'\xC0', '\x80'}` at start). `"ab\xC0\x80"` should report `pos == 2`. |
-| 13 | `join_with` overloads: `char`, `str`, `raw::String`; empty range; single element | Currently one line of coverage (L515–521, `const char*` only). |
-| 14 | Grapheme content, not just counts | Emoji ZWJ sequences (👨‍👩‍👧‍👦), regional indicators (flags), `\r\n` as one cluster; assert the actual bytes of each cluster, not only the count. |
-| 15 | `escape_default` for `\r` and `\n` | Only `\t`, quotes, backslash and non-printables are covered. |
+`Option::as_ref` / `as_mut` 能工作，是因为有 `Option<T&>` 特化，内部存指针。`Result` 没有对应特化。路线 A 写的借用路径（`as_ref().unwrap()` / `as_mut().unwrap()`）在 `Result` 上走不通。`tests/` 里没有调用，所以现有测试发现不了。
 
-### P2 — nice to have
+### 4. `Result::and_` 拒掉正常用法，`or_` / `or_else` 改错了类型参数
 
-- `c_str()` — **resolved** by removing `str::c_str()` (it was identical to
-  `as_raw()` and could not honour NUL-termination for sub-slices); see
-  `.agents/api_design.md` §11.
-- `to_std_string()` with non-ASCII content — **done** (`StrToStdString`).
-- `from_bytes_unchecked` round-trip as a direct (not helper) assertion — **done**
-  (`StrFromBytesUncheckedRoundTrip`).
-- `to_owned<CustomAlloc>()` / `replace<CustomAlloc>()` (allocator template
-  parameters are public API) — **done** (`StrAllocatorTransforms`). In the same
-  pass `to_owned` was renamed to `to_string` (Rust's name reads wrong in C++).
-- `parse<bool>` / `parse<unsigned>` (negative → `std::errc` behaviour) — **done**
-  (`StrParseBool` / `StrParseUnsigned`). `parse<bool>` also required a new
-  explicit specialization, because `std::from_chars` has no `bool` overload.
-- Use the actual panic message in more `EXPECT_DEATH` matchers — **done**; no
-  `".*"` matcher remains in `tests/str.cpp`.
-- Several assertions only check `.size()` of the collected pieces without
-  content (e.g. `StrSplitEdgeCases` L1141, L1189, L1212–1213) — **done**; every
-  content-relevant case now asserts each piece.
-- Suite name is `StringTest` for everything in `str.cpp`; `StrTest` would match
-  the file's purpose (see `.agents/codeStructure.md`) — **intentionally not
-  changed**.
+Rust 的形状是：
 
-## Implementation issues discovered during this review (test-worthy)
+- `and` / `and_then`：Ok 类型可以变，Err 类型不动
+- `or` / `or_else`：Ok 类型不动，Err 类型可以变
 
-1. ~~**`Char`'s `operator<<` saves/restores flags on the wrong stream**~~ —
-   **fixed.** `string.cppm` used to read `std::cout.flags()` but write `std::hex`
-   to `os` and restore on `std::cout`. It now saves/restores `os.flags()`, and
-   `StringTest.OperatorStreamInsertion` pins the regression.
-2. ~~**`std::formatter` / `std::hash` specializations are not exported**~~ —
-   **refuted** (see Verification below). The declarations at `string.cppm`
-   L5170–5244 really do lack `export`, but non-exported explicit specializations
-   are still visible to importing TUs; `std::format` and `std::unordered_set`
-   compile and run on both clang and GCC. Adding `export` explicitly is optional
-   hygiene, not a bug fix.
-3. ~~**`str::slice(from, to)` doc comment says `to` is inclusive**~~ —
-   **fixed.** The doc now says `to` is exclusive and the panic notes match the
-   implementation.
-4. ~~**`operator""_s` / `operator""_S` ignore the `size_t len` parameter**~~ —
-   **fixed.** Both now go through `str::from_raw_parts(str, len)` /
-   `String::from_raw_parts(str, len)`, so embedded NULs are preserved;
-   `StringTest.StrLiteralEmbeddedNul` pins it.
-5. ~~**`Char::is_whitespace` misses U+000B**~~ — **fixed.** U+000B is now
-   recognised as Unicode whitespace (matching Rust's `char::is_whitespace`);
-   `is_ascii_whitespace` still excludes it, and `trim_ascii` therefore leaves it
-   alone. `StringTest.VerticalTabIsWhitespace` pins both.
-6. ~~**`matches()` yields byte indices, not matched slices**~~ — **fixed.**
-   `matches()` now yields the matched `str` slices (Rust semantics), its
-   `Char`/`char` overloads were added, and `rmatches()` (all five overloads) was
-   added for symmetry. `match_indices`/`rmatch_indices` keep the
-   `(index, slice)` shape, so `matches(p)` is now `match_indices(p)` without the
-   index. Covered by `StrMatches`, `StrMatchesEdgeCases`, `MatchesOverloads` and
-   `RMatches`.
+`and_`（L63–80）的函数体是对的：Ok 返回 `res`，Err 把 `E` 装进 `Result<U, E>`。约束却是
 
-## Verification of the P0 claims
+```cpp
+requires (std::convertible_to<T, U> || std::convertible_to<U, T>)
+```
 
-The P0 items were re-checked with real compiles and runs (clang/libstdc++ and
-GCC 16.2.0, using the prebuilt modules) rather than by reading alone:
+`T` 和 `U` 在 Ok 分支根本不互转。`Result<int, std::string>::and_(Result<std::string, std::string>)` 这种 `and` 的本来用途会被约束直接丢掉。
 
-- **#1 — confirmed.** `Char(0x110000)`, `Char(0xD800)` and `Char(0xDFFF)` all
-  terminate with `Panic encountered: Invalid Unicode scalar value`.
-- **#2 — confirmed (behaviour), corrected (mechanism).** `"\xC0\x80"_s`
-  terminates via `panic() -> std::terminate()`, independent of the `noexcept`.
-- **#3 — refuted.** `std::format("{}", s)` compiles and prints `hello`;
-  `std::unordered_set<str>` compiles; both clang and GCC agree. The custom
-  formatter is genuinely used (a probe showed `std::format("{}",
-  std::array<std::byte, 1>{})` does *not* compile, so there is no
-  range-formatter fallback). A control module confirmed clang still hides
-  ordinary non-exported entities, so the visibility of explicit specializations
-  is real and not an artefact of `-fmodule-file`. Only the untested-ness
-  remains.
-- **#4 / #5 — confirmed coverage gaps** (both usages compile).
-- **#6 — confirmed.** `from(nullptr)` is empty, `from_raw_parts(nullptr, 0)` is
-  `Ok`, `from_raw_parts(nullptr, 3)` is `Err(pos == 0)`, and default
-  `str().as_bytes()` is empty.
+`or_`（L285–303）签名是 `Result<U, E> -> Result<U, E>`：改 Ok 类型、留下原来的 `E`。`Result<int, ErrA>::or_(Result<int, ErrB>)` 对不上这个签名。Ok 分支还要 `Result<U, E>(T(...))`，所以只有 Ok 类型碰巧能互转时才能编译。
 
-All real P0 items now have tests in `tests/str.cpp`:
-`CharInvalidScalarValuePanics`, `StrLiteralInvalidUtf8Panics`,
-`StringHasherTransparent`, `StringHasherHeterogeneousLookup`,
-`OperatorStreamInsertion` (also pins the `Char` stream-flag fix) and
-`StrNullPointerHandling`. Verified green: **140/140 tests pass under both GCC
-16.2.0 and clang (mingw/libstdc++)**.
+`or_else`（L314–334）把回调锁成 `Result<typename U::type, E>`，同样是「Ok 类型可变、Err 类型冻结」。回调收到的永远是 `E&`（L333），右值 self 也不会把 `E&&` 交出去。Rust `or_else` 要的是 `FnOnce(E) -> Result<T, F>`。
 
-Writing those tests also exposed a related omission, now fixed: there was no
-`operator==` between `str` and `std::string_view` in either direction, so
-`StringHasher`'s `string_view` overload could not drive heterogeneous lookup.
-Both directions were added to `string.cppm`, and `StrStringViewComparison`
-covers them.
+`@brief` 和函数体还反了：`and_` 的 brief 描述的是 `or_`（Err 时返回 res），`@return` 才是函数体。`Option::and_`（L112–115）的 brief 和 `@return` 都写成了 `or_`（Some 时返回自己），函数体是 Some 时返回 `optb`。
 
-## Suggested next steps
+### 5. 引用特化的 `unwrap_or_default` 和 `ok_or` 不能用
 
-1. Add the P0 tests first; they protect the panic contract and are cheap.
-2. `std::format` + `std::unordered_set<str>` usage was compiled and runs fine
-   (issue #2 refuted) — still add it as a smoke test so the interop surface
-   (P0 #4/#5, `StringHasher`, `operator<<`) is covered going forward.
-3. Add the U+000B and trailing-`\r` cases; both are one-liners that pin down
-   Unicode conformance.
-4. Rename the suite to `StrTest` opportunistically (not worth a standalone PR).
+状态：2026-10-14 已删除引用特化的 `unwrap_or_default`。引用没有默认值，None 分支无法返回一个活过函数的引用。`ok_or` / `ok_or_else` 仍返回 `Result<T&>`，问题还在。
+
+`Option<T&>::unwrap_or_default`（已删除）在 None 分支：
+
+```cpp
+return static_cast<T>(raw_type{});
+```
+
+`T` 是引用。
+
+- `Option<int&>`：`static_cast<int&>(int{})` 不能把右值绑到非 const 左值引用，这一支让整个函数实例化失败。
+- `Option<const int&>`：`static_cast<const int&>(int{})` 能编译，返回的引用绑在函数内的临时对象上，返回时临时对象已经销毁。`const int x = opt.unwrap_or_default();` 也是从未定义行为里拷贝。
+
+`ok_or` / `ok_or_else`（L1239–1266）的返回类型是 `Result<T, E>`，`T` 在这个特化里是引用，于是落到问题 3：`Result<int&, E>` 非法。指针特化的 `ok_or` 返回 `Result<T*, E>`，这一条本身可以成立。
+
+### 6. `std::hash<Option<T>>` 撞车，并且指针特化一用就编不过
+
+```1438:1454:src/option.cppm
+template<typename T>
+    requires requires (const T& t)
+    {
+        { std::hash<T>{}(t) } -> std::convertible_to<size_t>;
+    }
+struct hash<crab_cpp::Option<T>>
+{
+    auto operator()(const crab_cpp::Option<T>& opt) const -> size_t
+    {
+        if (opt.is_none())
+        {
+            return std::hash<int>{}(0);
+        }
+
+        return std::hash<T>{}(std::get<1>(opt));
+    }
+};
+```
+
+三件事叠在一起：
+
+- None 的哈希是 `hash<int>(0)`，也就是 0。`std::hash<int>` 对 0 也是 0，所以 `Option<int>{}` 和 `Option<int>{0}` 的哈希永远相同。§6.4 要求 None/Ok/Err 带判别式再和值哈希混合。`Result` 的 `std::hash`（`src/result.cppm` L656–664）已经这么做了。
+- 这个偏特化不区分主模板和指针特化。`std::hash<int*>` 存在，于是 `std::hash<Option<int*>>` 会选中它，函数体里的 `std::get<1>` 要求 `std::variant`。`Option<int*>` 不是 variant，调用即硬错误。`unordered_set<Option<int*>>` 编不过。
+- `std::hash<int&>` 不存在，`Option<int&>` 没有哈希。§6.4 要求三个形态都能做无序容器的 key，引用形态应哈希被引用的对象。
+
+## P1
+
+### 7. 组合子的约束按 `T&` 写，右值分支传入的是 `T&&`
+
+`Option` 的 `map` / `and_then` / `map_or` / `map_or_else` 以及 `Result` 的 `map` / `and_then` / `map_err` / `map_or` 都用 `invoke_result_t<F, T&>`（或 `E&`）做默认模板参数和 `requires`。右值分支实际调用的是 `f(std::get<...>(std::move(self)))`，实参类别是 `T&&`。
+
+- 只接 `T&` 的 lambda 能通过约束，右值调用在函数体内失败，不是 SFINAE。
+- 只接 `T&&` 或按值接 move-only `T` 的 lambda，在 `invoke_result_t<F, T&>` 这一步就被丢掉。`std::move(opt).map([](std::unique_ptr<int> p) { ... })` 没有候选。
+- 能同时走过左右值的，是 `auto&&`、`const T&`，以及可拷贝类型的按值参数。
+
+`Result` 还有对称的另一支忘了移：
+
+- `map` 的 Err 支（L244）和 `and_then` 的 Err 支（L53）是 `return std::get<1>(self)`。`self` 是参数名，表达式永远是左值，`E` 被拷贝。`E` 为 move-only 时，Ok 支即使改对了，整个函数仍然编不过。
+- `map_err` 的 Ok 支（L274）同样 `return std::get<0>(self)`，move-only 的 `T` 让 `map_err` 编不过。
+
+右值分支要在 `if constexpr` 里把约束也拆开，Err/Ok 的另一支用 `std::move`。
+
+### 8. `noexcept` 仍然会把用户异常变成 `terminate`
+
+§3.7 要修的就是这类谎报。函数被标成 `noexcept` 之后，回调或转换抛出的异常在边界上变成 `std::terminate`。
+
+无条件 `noexcept`、函数体却调用用户代码：
+
+| 位置 | 调用 |
+| --- | --- |
+| 指针 / 引用 `or_else`（option.cppm L690、L1126） | `f()` |
+| 指针 / 引用 `unwrap_or_else`（L771、L1206） | `f()` |
+| 指针 / 引用 `filter`（L834、L1277） | `pred(...)` |
+
+同文件里的 `is_some_and` 没有标 `noexcept`，谓词同样可能抛。`filter` 多出来的 `noexcept` 是写错了。
+
+`Result::unwrap_or_else`（L464–479）的 `noexcept` 只看 `T` 的拷贝和移动。`T` 为 `int` 时条件为真，`return T(f())` 里 `f()` 抛异常仍会 terminate。`unwrap_or`（L435）没有把 `is_nothrow_constructible_v<T, U>` 算进去；`unwrap_or_default`（L492）没有把 `is_nothrow_default_constructible_v<T>` 算进去。
+
+`Result::and_`（L66）的 `noexcept` 只看 `E`。Ok 分支 `return res` 要移动 `U`，`U` 的移动抛异常时同样 terminate。`or_`（L288）只看 `T`，`return res` 还要移动 `Result<U, E>`。
+
+### 9. `operator<=>` 的返回类型写成了 `std::strong_ordering`
+
+主模板 `Option`（L500–504）和 `Result`（L630–634）都 `requires std::three_way_comparable<...>`，返回类型写死 `std::strong_ordering`，函数体把底层 `<=>` 直接返回。
+
+`std::three_way_comparable<double>` 为真，但 `std::variant` 的 `<=>` 得到的是 `std::partial_ordering`。`partial_ordering` 不能转换成 `strong_ordering`。`Option<double>`、`Result<double, int>` 的 `<=>` 在调用时实例化失败。引用特化（L1401–1419）对值的比较有同样的问题；None/Some 的判别式比较本身可以是 `strong_ordering`，值和判别式要取公共比较类别。
+
+指针特化（L936–939）返回 `lhs.ptr <=> rhs.ptr`。不指向同一数组的指针，`<=>` 的结果是未指定的，`Option<T*>` 的顺序没有可用的全序。
+
+### 10. `unzip` 对左值也是消费
+
+§3.8：左值拷贝两个元素、self 不变；右值移出并置 `None`。主模板 `unzip`（L457–480）不是 deducing this，Some 分支无条件 `std::forward` 移出元素再 `*this = None{}`。
+
+`tests/option.cpp` 的 `OptionTest.Unzip` 断言左值 `unzip` 之后 `some.is_none()`。测试把和 §3.8 相反的行为钉死了。`noexcept` 也只检查了移动构造，和「左值要拷贝」对不上。
+
+### 11. `inspect` 把右值降成左值，存下来的引用仍然悬垂
+
+§3.4 把 `inspect` 改成返回 `Self&`，并认为 `auto&& x = make().inspect(f)` 的悬垂因此消失。
+
+deducing this 在右值上把 `Self` 推成值类型，返回类型就是 `Option<T>&` / `Result<T, E>&`，绑的是参数 `self`。临时对象的生命周期不会因为「返回了指向参数的左值引用」而延长。`auto& x = Option<int>(1).inspect(f);` 在完整表达式结束时悬垂，和改之前一样。
+
+链式调用还把右值变成左值。`Option<std::unique_ptr<int>>(...).inspect(f).unwrap()` 里 `unwrap` 走左值拷贝，move-only 的 `T` 直接编不过。可拷贝类型则会多一次拷贝，并且后续组合子不再走右值重置。完整表达式里的链式调用只保证临时对象活到分号，不保证后面的调用仍是消费。
+
+### 12. 指针 / 引用特化没有跟着值类别规则走
+
+§2.5：指针特化右值消费要把 `ptr` 置空；引用特化右值同样置空。`unwrap` / `expect` / `unwrap_unchecked` 做了。新补上的 `or_`、`or_else`、`filter`、`map`、`and_then`、`map_or`、`unwrap_or` 都不是 deducing this，右值调用和左值一样，源对象保持 Some。
+
+`std::move(ptr_opt).filter(pred)` 在谓词为假时返回 None，`ptr_opt` 里的指针还在。主模板 `or_` 会重置，两个特化的 `or_`（L672、L1107）不会。
+
+指针特化 `is_none` / `is_some` 的 `@brief` 和 `@return` 是反的（L583–598）：`is_none` 的 brief 写成「指针非空时返回 true」。`@return` 那一行是对的。
+
+## P2
+
+### 13. 文档和代码互相矛盾，代理会按错的文档改
+
+- `.agents/codeStyle.md` 被模板替换过：`crab_cpp` 全部变成了 `module_name`，示例模块也变成了 `module_name:sub1`。`AGENTS.md` 要求严格遵循这份风格。`api_design.md` §8 步骤 1 写过「若被模板覆盖需先恢复」，勾成完成时文件仍是替换后的内容。命名示例里还留着已经删除的 `expect_take`。
+- `api_design.md` §3.1 的代码样例仍是「左值 `unwrap` 返回 `T&`」。§2 和 §8 步骤 3 的路线 A 已经改成一律按值返回，实现走的是路线 A。按 §3.1 回改会把 `MutexGuard` 的迁移（`as_mut().unwrap()`）再弄坏。
+- `.agents/codeStructure.md` 的 `Option` 方法列表仍包含 `take` / `take_if` / `take_or_*`，`Result` 仍包含 `replace`。
+
+### 14. 新契约没有测试
+
+`tests/option.cpp` 删除了 `Take`、`TakeIf`、`TakeOrDefault`、`TakeOrElse`、`ExpectTake`，`tests/result.cpp` 删除了 `Replace`。仓库里的测试没有覆盖：
+
+- `unwrap_or*`、`ok_or*`、`filter`、`is_some_and`、`contains`
+- 右值 `map` / `and_then` 之后源对象必须是 `None`
+- `Result::as_ref` / `as_mut`
+- `operator==` / `operator<=>` / `std::hash`
+- move-only `T` / `E` 的右值组合子
+- `noexcept` 边界（回调抛异常时应传播，而不是 terminate）
+
+`OptionTest.Unzip` 目前保护的是「左值也被掏空」。问题 1–9 都碰不到现有断言。
+
+### 15. `replace` 先移出旧值再构造新值
+
+主模板 `replace`（L375–380）：先 `auto temp = std::move(std::get<1>(*this))`，再 `*this = T(std::forward<U>(t))`。新值的构造或赋值抛出时，`temp` 在栈展开中销毁，`*this` 留下 moved-from 的 `T`，旧值丢了。先在局部把新的 `T` 构造出来，再移出旧值，抛异常时 `*this` 可以保持原值。
+
+## 核对过、和设计一致的部分
+
+- 主模板 `unwrap` / `expect` / `unwrap_unchecked` 经 `internal::unwrap_impl` 按值返回：左值拷贝，右值移出并 `self = None{}`。指针特化右值置 `nullptr`，引用特化右值置空后返回原来的引用，不再返回指向成员槽位的 `T&`。
+- `Result::ok` / `err` 左值拷贝、右值移出，左值不再被无条件 `std::move` 掏空。
+- `Result::replace` 已删除。`operator""_S` 改为 `std::move(...ok()).expect(...)`，和按值 `expect` 一致。
+- `tests/mutex.cpp` 里 move-only 的 `MutexGuard` 改为 `as_mut().unwrap()`，和路线 A 的借用路径一致。
+- `tests/string.cpp` 去掉 `capacity()` 相等断言，是因为右值 `unwrap` 现在真的移走了 `String`，不再靠拷贝留下相同容量。
+
+## 建议的修复顺序
+
+1. 把问题 1 的 P0 API 补回 `Option<T>` 主模板，引用特化不要返回 `Result<T&>` 或指向临时对象的引用（问题 5）。
+2. 右值组合子在回调返回后置 `None`（问题 2）；`Result` 的另一支改为 `std::move`，约束按值类别拆开（问题 7）。
+3. `Result::as_ref` / `as_mut` 需要能存放引用的表示，或者先不要提供这条 API（问题 3）。在此之前，路线 A 的借用写法只对 `Option` 成立。
+4. `Result::or_` / `or_else` 改成保留 `T`、替换 `E`；`and_` 去掉 `T`/`U` 可转换约束（问题 4）。
+5. 按问题 8 收紧 `noexcept`，再补问题 6 的哈希和问题 9 的比较类别。
+6. 用会失败的测试把上述契约钉住，再改 `unzip` 的左值语义（问题 10，要同步改 `OptionTest.Unzip`）。

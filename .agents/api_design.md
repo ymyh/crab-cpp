@@ -1,609 +1,465 @@
-# Public API Design
+# API Design — Option / Result 语义对齐审查
 
-This document records the design decisions behind the public API of
-`crab_cpp`. It is written before implementation so that the surface, naming and
-edge-case semantics are agreed on first.
+> 状态：2026-10-14 第三版。第七章全部决策点已拍板（✅ 并写入正文），
+> 无阻塞的开放问题；仅 `Ok` / `Err` 构造器的两种形态留待实现时二选一
+> （6.3，P2）。本文档是 `Option<T>` / `Result<T, E>` 与 Rust `std` 语义
+> 的对齐审查与修正计划；通用公共 API 设计原则待后续补充。
 
-Currently it covers:
+## 1. 背景与目标
 
-- [`str`](src/string.cppm) — extending the borrowed UTF-8 slice so it can stand
-  in for Rust's `&str` in everyday code.
+`Option<T>` / `Result<T, E>` 的 API 面按 Rust 语义设计，但若干方法在
+C++ 化的过程中语义发生偏移（`unwrap` 恒返回左值引用、`take` 返回 `T`
+且 panic 等）。目标：以 Rust `std` 语义为基准修正不对齐之处、补齐重要
+缺失 API。优先级：P0 = 正确性问题或最常用的缺失 API；P1 = 常用但可
+绕过；P2 = 语法糖与生态整合。
 
-Related documents: @.agents/codeStyle.md, @.agents/codeStructure.md,
-@.agents/phases.md.
+## 2. 所有权与值类别总约定（统一值类别规则）
 
----
+C++ 没有生命周期检查器，Rust 的"消费式 `self` + 编译器禁止后续使用"
+无法照搬。crab_cpp 的对应物是**统一值类别规则**（✅ DP-1 修订版 /
+DP-10 / DP-11）：**self 的值类别表达借用或消费意图**，与
+`auto x = vec[0];`（拷贝）vs `auto x = std::move(vec[0]);`（移动）的
+标准库惯例一致。
 
-## 1. Goal
+1. **左值 self（含 const）→ 借用**：组合子回调拿 `T&` / `const T&`；
+   返回新对象的方法（`ok` / `or_` / `map` …）按需拷贝构造，**self 保持
+   不变**。`unwrap` 家族（`unwrap` / `expect` / `unwrap_unchecked` /
+   `unwrap_or` / `unwrap_or_else` / `unwrap_or_default`）例外：全部
+   **按值返回**（左值拷贝、右值 move），与 Rust 消费语义一致，同族
+   签名统一。左值想不拷贝地借用内部值，走 `as_ref()`（→
+   `Option<const T&>`）/ `as_mut()`（→ `Option<T&>`）后 `.unwrap()`
+   得引用，或 match / `std::get`。
+2. **右值 self → 消费**：访问器在函数内部 move-out 并**返回 `T` 按值**
+   （NRVO）；组合子回调拿 `T&&`；Option 消费后 **self 重置为 `None`**
+   （✅ DP-11a，确定性后状态）；`Result` 没有空状态，只能留 moved-from，
+   `@note` 标注。
+   - **实现硬约束**：右值路径不能写成 `decltype(auto)` 纯转发
+     （`return std::get<1>(std::forward<Self>(self))` 返回 `T&&`，move
+     实际发生在调用方，函数内没有安全的时机执行重置——先重置则返回
+     悬垂引用）。必须 `if constexpr` 按值类别分路，move 与重置都发生在
+     函数内部，见 3.1 的模式。
+3. **显式放弃所有权**：用户写 `std::move(opt).unwrap()` 表示消费
+   （对应 Rust 的 move-out）；`opt.unwrap()` 表示借用。不产生
+   `auto b = a.map(f);` 隐式窃取 `a` 的惊吓。
+4. **panic 约定**：`unwrap*` / `expect*` 家族 panic；组合子与
+   `unwrap_or*` 家族永不 panic。
+5. **指针特化**：指针拷贝即借用，`unwrap` / `expect` 一律返回 `T` 按值；
+   左值不置空（借用），右值置 `ptr = nullptr`（消费）。
+   **引用特化**：`T = U&`，左值返回 `U&`（self 不动）；右值返回 `U&`
+   并置 `ptr = nullptr`。
 
-`str` already implements the hard, UTF-8-aware parts (validation, graphemes,
-`find`/`replace`, formatting). What is missing is mostly the *bread-and-butter*
-surface: boundary-safe indexing, the full split family, `char`-pattern
-overloads, Unicode trimming, byte/char-index iteration and escaping.
+## 3. `Option<T>` 主模板 — 语义不对齐清单
 
-The goal of this phase is:
+### 3.1 `unwrap` / `expect` / `unwrap_unchecked`（✅ DP-1 修订版）
 
-- Reach day-to-day parity with Rust's `&str` for the ~90% of methods people
-  actually call.
-- Keep the Rust names and semantics, including the panicking vs.
-  `Option`-returning split (`slice`/`split_at` panic, `get`/`split_at_checked`
-  return `Option`).
-- Fix the inconsistencies that already exist (missing `const char*` overloads,
-  the broken `trim_ascii_end`, `trim_ascii*` only handling `U+0020`).
-
-Non-goal: a full `Pattern` trait, `str` indexing, or non-`constexpr`
-normalization.
-
----
-
-## 2. Current surface
-
-`str` (see `src/string.cppm`) currently exposes:
-
-| Group | Methods |
-| --- | --- |
-| Constructors | `str()`, `str(const plain_str&)`, `from_raw_parts`, `from_bytes_unchecked`, `from(const char*)` |
-| Views | `as_bytes`, `as_raw`, `data`, `begin`/`end` |
-| Queries | `empty`, `size`, `is_ascii`, `eq_ignore_ascii_case` |
-| Search | `contains(str)`, `find(str)`, `find(const char*)`, `rfind(str)`, `rfind(const char*)`, `starts_with(str)`, `ends_with(str)` |
-| Indexing | `slice(from, to)`, `slice(from)` |
-| Strip | `strip_prefix`/`strip_suffix` (`str` + `const char*`) |
-| Trim | `trim_ascii`, `trim_ascii_start`, `trim_ascii_end`, `trim_start_matches(str)`, `trim_end_matches(str)` |
-| Transform | `replace`, `replace_n`, `repeat`, `to_ascii_lowercase`, `to_ascii_uppercase`, `to_std_string` |
-| Parse | `parse<T>()` |
-| Iterators | `chars`, `lines`, `matches`, `split`, `split_ascii_whitespace`, `graphemes` |
-| Operators | `==`, `<=>`, `format`/`hash`/`<<` support |
-
-### Known defects to fix along the way
-
-1. **`trim_ascii_end` is UB for an all-whitespace string.** `size_t i` counts
-   down with `for (; i >= 0; i -= 1)`; when every byte is a space, `i` wraps to
-   `SIZE_MAX` and `m_data[SIZE_MAX]` is read.
-2. **`trim_ascii*` only strips `U+0020`.** Per Rust, ASCII whitespace is
-   `U+0009 U+000A U+000C U+000D U+0020`.
-3. **Overload sets are inconsistent.** `contains`/`starts_with`/`ends_with` and
-   `trim_*_matches` have no `const char*` overload, while `find`/`rfind`/
-   `split`/`strip_*` have no `raw::String` overload (except `split`/`matches`).
-   Today `s.contains("x")` does not compile, because there is no implicit
-   `const char* -> str` conversion.
-4. **`slice(from, to)` underflows when `to < from`.** The guard checks
-   `from`/`to` against the length but never `to >= from`, so `slice(5, 2)`
-   computes `to - from` as a huge `size_t` and then validates a wildly
-   out-of-bounds range. The doc comment already promises a panic; the guard must
-   honour it.
-5. **`chars()` / `graphemes()` drop their last element in a range-for.** Their
-   iterators model "end" as `pos == size`, but the last element is read when
-   `pos` already equals `size`, so the iterator compares equal to `end` before
-   it is yielded. Fixed by keying the end sentinel off a null `s` pointer, as
-   `lines`/`matches`/`split` already do. (`it->…` on the old "end" masked this,
-   which is why the original tests passed.)
-6. **`split(pattern)` dropped a trailing empty piece.** `"a,b,".split(',')`
-   yielded `["a", "b"]` in a range-for instead of Rust's `["a", "b", ""]`.
-7. **`lines()` corrupted a single line that ends with a line ending.** In the
-   first-line scan `pos` was advanced past the `\n`/`\r\n` before testing
-   `pos >= size`, so the "no ending found" fallback fired and `"a\n"` was
-   reported as the single line `"a\n"` (likewise `"a\r\n"`). An empty string
-   also reported one empty line instead of none.
-
----
-
-## 3. Gap analysis against Rust `&str`
-
-Priority: **P1** = core, expected by almost every caller; **P2** = common but
-can wait; **P3** = rare / unstable.
-
-| Rust `&str` | Status | Proposed `crab_cpp` | Priority |
-| --- | --- | --- | --- |
-| `as_bytes` | done | `as_bytes` | — |
-| `as_ptr` / `as_ptr_range` | partial | `data()` (`as_ptr_range` P3) | — |
-| `len` / `is_empty` | done (`size`/`empty`) | optional aliases `len`/`is_empty` | P3 |
-| `is_char_boundary` | **missing** | `is_char_boundary` | **P1** |
-| `get(range)` | **missing** | `get(from, to)` / `get(from)` | **P1** |
-| `split_at` / `split_at_checked` | **missing** | `split_at` / `split_at_checked` | **P1** |
-| `floor_char_boundary` / `ceil_char_boundary` | **missing** | same | P3 |
-| `chars` | done | `chars` | — |
-| `char_indices` | **missing** | `char_indices` | **P1** |
-| `bytes` | **missing** | `bytes` (thin view over `as_bytes`) | P2 |
-| `encode_utf16` | **missing** | `encode_utf16` | P3 |
-| `find` / `rfind` (str) | done | — | — |
-| `find` / `rfind` (char) | **missing** | `find(Char)`, `find(char)`, … | **P1** |
-| `contains` / `starts_with` / `ends_with` (char) | **missing** | overloads | **P1** |
-| `contains`/`starts_with`/`ends_with` (str literal) | **missing** | `const char*` overloads | **P1** |
-| `split_once` / `rsplit_once` | **missing** | same | **P1** |
-| `split` (char) | **missing** | `split(Char)` / `split(char)` | **P1** |
-| `splitn` / `rsplitn` | **missing** | same | P2 |
-| `rsplit` | **missing** | `rsplit` | P2 |
-| `split_terminator` / `rsplit_terminator` | **missing** | same | P2 |
-| `split_inclusive` / `rsplit_inclusive` | **missing** | same | P2 |
-| `split_whitespace` | **missing** | `split_whitespace` | P2 |
-| `split_ascii_whitespace` | done | — | — |
-| `lines` | done | `lines` | — |
-| `matches` / `rmatches` | done (`matches`/`rmatches` yield the matched `str` slices) | `match_indices`/`rmatch_indices` add `(index, str)` | — |
-| `strip_prefix` / `strip_suffix` (char) | **missing** | overloads | P2 |
-| `trim` / `trim_start` / `trim_end` (Unicode) | **missing** | same | **P1** |
-| `trim_matches` (+ char/predicate) | **missing** | same | P2 |
-| `to_ascii_lowercase` / `to_ascii_uppercase` | done | — | — |
-| `to_lowercase` / `to_uppercase` (Unicode) | **missing** | same | P2 |
-| `escape_default` / `escape_debug` / `escape_unicode` | **missing** | same | P2 |
-| `replace` / `replacen` | done (`replace`/`replace_n`) | keep `replace_n` | — |
-| `repeat` | done | — | — |
-| `parse` | done | — | — |
-| `is_ascii` / `eq_ignore_ascii_case` | done | — | — |
-| `to_owned` / `to_string` | done | `to_string` (C++ idiom; Rust's `to_owned` name rejected) | — |
-| `from_utf8_lossy` | **missing** | `raw::String<Alloc>::from_utf8_lossy` | P3 |
-
----
-
-## 4. Design decisions
-
-### 4.1 Pattern handling
-
-Rust uses the `Pattern` trait so `split`, `find`, `trim_matches`, … accept
-`char`, `&str`, `&[char]`, and closures through one signature. A faithful C++
-port is possible but expensive (a concept + type-erased searcher), and it would
-rewrite every existing call site.
-
-**Decision:** keep explicit overloads, and add the missing pattern kinds:
-`str`, `const char*`, `raw::String<Alloc>`, `Char`, and plain `char`.
-
-To keep this maintainable, the *implementation* normalizes every byte-pattern
-to a `str` and every character-pattern to its UTF-8 encoding, and all overloads
-forward to one private implementation per operation. Public signatures stay
-explicit; the duplication lives in one-line forwards.
-
-Notes:
-
-- **`Char` vs `char`.** `Char` is the correct Unicode scalar type, but `'a'` in
-  C++ has type `char`. We therefore provide `char` convenience overloads in
-  addition to `Char`, interpreting the `char` as its numeric value `0..=255`
-  and encoding it as UTF-8 (exact for ASCII, Latin-1 for `>= 0x80`). This is
-  documented; callers needing a real non-ASCII scalar use `Char`.
-- **`const char*` overloads** delegate via `str::from(...).expect(...)`, exactly
-  like the existing `find(const char*)`, so invalid UTF-8 panics.
-- A UTF-8 encoded `Char` search is safe: UTF-8 is self-synchronizing, so a
-  substring match can never land inside another sequence.
-
-### 4.2 Indexing: panicking vs. `Option`
-
-Rust deliberately splits this: `s[..]`, `slice`, `split_at` panic; `get`,
-`split_at_checked` return `Option`. We mirror that:
+**决定**：按统一值类别规则——左值返回引用，右值 move-out 返回 `T`
+按值并重置 self 为 `None`（✅ DP-11）。
 
 ```cpp
-[[nodiscard]] constexpr auto get(size_t from, size_t to) const noexcept -> Option<str>;
-[[nodiscard]] constexpr auto get(size_t from) const noexcept -> Option<str>;
-[[nodiscard]] constexpr auto split_at(size_t mid) const -> std::pair<str, str>;      // panics
-[[nodiscard]] constexpr auto split_at_checked(size_t mid) const noexcept -> Option<std::pair<str, str>>;
-```
-
-Both validate that the index is a char boundary (`is_char_boundary`). `get`
-returns `None` on non-boundary/out-of-range instead of panicking — this makes
-`get` the preferred primitive inside library code.
-
-### 4.3 Return types
-
-| Operation | Return |
-| --- | --- |
-| fallible index | `Option<str>` |
-| fallible split into two borrowed halves | `Option<std::pair<str, str>>` |
-| infallible split into two borrowed halves | `std::pair<str, str>` |
-| character iteration | `std::pair<size_t, Char>` (index, scalar) |
-| match iteration | `std::pair<size_t, plain_str>` (index, matched slice) |
-| allocating transforms (`to_string`, `escape_*`, Unicode case, `repeat`, …) | `raw::String<Alloc>`, `Alloc = std::allocator<std::byte>` defaulted |
-
-`plain_str` stays the iterator value type (as the existing `Split`/`Lines`
-iterators already do); it converts implicitly to `str`, so
-`for (auto part : s.split(","))` and `std::ranges::to<std::vector<str>>()` keep
-working. Structured bindings desugar `std::pair` cleanly:
-
-```cpp
-if (auto idx = s.find('@'); idx.is_some()) { /* ... */ }
-if (auto parts = s.split_once('='); parts.is_some())
+template<typename Self>
+[[nodiscard]] auto unwrap(this Self&& self)
+    -> /* 左值 self → T&（const self → const T&）；右值 self → T */
 {
-    auto [key, value] = parts.unwrap();
+    if (self.is_some())
+    {
+        if constexpr (std::is_lvalue_reference_v<Self>)
+        {
+            return std::get<1>(self);              // 借用：T&
+        }
+        else
+        {
+            T tmp = std::get<1>(std::move(self));  // 消费：move-out
+            self = None{};                          // DP-11：重置
+            return tmp;                             // 按值（NRVO）
+        }
+    }
+
+    panic("Calling Option<T>::unwrap() on a None value");
 }
 ```
 
-Option: introduce a `Match { size_t start; size_t end; str as_str(); }` type so
-`match_indices` mirrors Rust's `Match`. Deferred — the pair is enough for P1/P2.
+要点：
 
-### 4.4 Naming
+- 返回类型用 `if constexpr` 配套的条件返回类型（或等价 trait）实现；
+  声明处需区分 const 左值（`const T&`）与非 const 左值（`T&`）。
+- `noexcept` 相应条件化：左值路径返回引用基本不抛；右值路径
+  `noexcept(std::is_nothrow_move_constructible_v<T>)`。
+- `expect(msg)` 同一模式；`unwrap_unchecked`（✅ DP-3）改为
+  `std::get_if` + 解引用（`None` 为 UB，`@warning` 标注），同样按值
+  类别分路。
+- 迁移影响：README L126-127 `int num = opt.unwrap();`（左值借用）不变；
+  `tests/string.cpp` 的 `String::from(...).unwrap()`（右值）从"靠拷贝
+  碰巧成立"变为真正的 move ✓；唯一的破坏是旧代码若把右值 unwrap 的
+  结果当左值引用用（本来就悬垂，属既有 bug）。
 
-- Keep Rust names wherever they do not clash with C++ (`is_char_boundary`,
-  `char_indices`, `split_once`, `split_terminator`, `trim_start_matches`).
-- Existing C++-flavoured deviations stay for compatibility:
-  `size()` (not `len()`), `empty()` (not `is_empty()`),
-  `slice()` (Rust has no direct equivalent) and `replace_n()` (Rust:
-  `replacen`). Optional `len()`/`is_empty()` aliases are P3.
-- Exit/entry naming: `rsplit`/`rsplit_once` use the `r` prefix exactly as Rust.
-- New allocating methods follow the existing `template<typename Alloc>` shape of
-  `to_ascii_lowercase` so custom allocators keep working.
+### 3.2 take 家族删除（✅ DP-2 / DP-7）
 
-### 4.5 Unicode whitespace
+**删除**：`take`、`take_if`、`take_or_default`、`take_or_else`、
+`expect_take`（主模板与两个特化同步删除）。
 
-`trim`/`split_whitespace` need `char::is_whitespace` (Unicode `White_Space`).
-utf8proc does not expose the property directly, so we add a `Char::is_whitespace`
-helper defined as: category `Zs`/`Zl`/`Zp`, or the code points
-`U+0009..=U+000D` and `U+0085`. This matches Unicode `White_Space` exactly
-(it intentionally excludes `U+001C..=U+001F`).
+理由（已确认）：Rust 需要 `take` 是因为 `unwrap` 消费 self，`&mut
+Option` 无法调用，只能 take 先把借用转成所有权；C++ 的借用/消费由值
+类别表达（`opt.unwrap()` 借用、`std::move(opt).unwrap()` 消费），
+take 家族整体冗余。替换映射：
 
-`trim_ascii*` is instead fixed to use `Char::is_ascii_whitespace` (the existing
-`Char` method already implements the correct set).
+| 原用法 | 替换 |
+| --- | --- |
+| `take().unwrap()` | `std::move(opt).unwrap()` |
+| `take().unwrap_or(d)` / `take_or_default()` / `take_or_else(f)` | `std::move(opt).unwrap_or(d)` / `unwrap_or_default()` / `unwrap_or_else(f)`（P0 补齐） |
+| `take_if(pred)` | `filter(pred)`（P0 补齐，Rust 语义） |
+| `expect_take(msg)` | `std::move(opt).expect(msg)` |
+| "self 变为 None"后条件 | 右值消费路径的重置（DP-11） |
 
-### 4.6 Empty-pattern semantics
+唯一未完全覆盖的模式：**从左值取出整个 `Option<T>` 同时 self 置
+None**（take() 形态本身）。部分替代：`opt.replace(new)` 取出旧值的
+`Option<T>`（代价是必须提供新值）。已接受的权衡。
 
-Rust gives the empty pattern very regular behaviour, and the current code
-diverges from it:
+### 3.3 组合子（✅ DP-10：与 unwrap 同一逻辑）
 
-| Call | Rust | Current `crab_cpp` |
-| --- | --- | --- |
-| `"abc".find("")` | `Some(0)` | `None` |
-| `"abc".rfind("")` | `Some(3)` (i.e. `len`) | `None` |
-| `"abc".matches("")` | matches at every char boundary (incl. 0 and len) | empty range |
-| `"abc".split("")` | `["", "a", "b", "c", ""]` | `["abc"]` |
+`map` / `and_then` / `map_or_else` / `or_else` / `filter` 及 `Result`
+的 `map` / `map_err` / `and_then` 全部按统一值类别规则：
 
-**Decision (implemented in Phase 1):**
-
-- `split` now keeps a trailing empty piece (defect 6). This matches Rust and
-  did not require changing the existing tests.
-- `split_once("")` / `rsplit_once("")` (new) follow Rust and return
-  `Some(("", self))` / `Some((self, ""))`.
-
-**Phase 2 update:** the empty pattern of `find`/`rfind`/`matches`/`split` is now
-aligned with Rust as well. `find("")` returns `Some(0)`, `rfind("")` returns
-`Some(len)`, `matches("")` matches at every code point boundary (including `0`
-and `len`), and `split("")` yields a piece per boundary. This changed
-already-shipped behaviour, so the corresponding tests were updated.
-
-### 4.7 Iterator ownership (important)
-
-`plain_str` only *borrows*. For character patterns the encoded bytes are up to
-4 bytes and would otherwise point at a dead local. Therefore every new
-iterator that stores a character pattern must own its encoding:
+- 左值 self：回调拿 `T&`，self 保持不变（现有用法零破坏）；
+- 右值 self：回调拿 `T&&`，随后 self 重置为 `None`（Option）/
+  moved-from（Result）。
 
 ```cpp
-struct Split
+// map 的右值路径示例
+if constexpr (/* 右值 */)
 {
-    std::byte pattern_buf[4];   // owned storage for a Char pattern
-    plain_str pattern;          // points into pattern_buf when needed
-    ...
-};
+    auto result = f(std::get<1>(std::move(self)));
+    self = None{};
+    return result;
+}
 ```
 
-The same applies to `SplitN`/`RSplit`/`SplitInclusive`/`Matches` and the
-`trim_*_matches` helpers. Byte patterns keep pointing at the caller's buffer
-(borrow semantics, matching the argument's lifetime), exactly as today.
+`take_if` 传 `T&` 是正确的这一性质由 `filter` 继承（Rust `filter`
+谓词为 `FnOnce(&T)`）。`inspect` 是唯一例外：恒为借用（3.4）。
 
-### 4.8 `constexpr` and `noexcept`
+### 3.4 `inspect`（✅ DP-4a）
 
-- `noexcept` on everything that cannot throw — true for all non-allocating
-  methods.
-- `constexpr` where the code path allows it. Methods that call `utf8proc`
-  (`chars`, `char_indices`, `trim`/`split_whitespace`, Unicode case) keep the
-  `constexpr` keyword like the existing `Chars`/`Graphemes` iterators do; they
-  simply are not usable in a constant expression.
-- Allocating methods cannot be `constexpr` (allocation).
-
----
-
-## 5. Proposed API
-
-Signatures below are the intended public form. `…` denotes the existing
-`str` / `const char*` / `raw::String<Alloc>` overload family, repeated for
-`Char` and `char` where noted.
-
-### A. Boundary and indexing — P1
+Option 与 Result 统一返回 `Self&`（借用式副作用探针，对 Rust 的
+**有意偏离**——Rust 的 `inspect` 消费并返回 `Self`）：
 
 ```cpp
-// true for index in [0, size], including size (end) and any UTF-8 boundary
-[[nodiscard]] constexpr auto is_char_boundary(size_t index) const noexcept -> bool;
+template<typename F, typename Self>
+    requires std::invocable<F, T&>
+auto inspect(this Self&& self, F&& f) -> Self&
+{
+    if (self.is_some())
+    {
+        f(std::get<1>(self));
+    }
 
-// get: None unless from <= to, to <= size and both are char boundaries
-[[nodiscard]] constexpr auto get(size_t from, size_t to) const noexcept -> Option<str>;
-[[nodiscard]] constexpr auto get(size_t from) const noexcept -> Option<str>;
-
-// panics when mid is out of bounds / not a boundary
-[[nodiscard]] constexpr auto split_at(size_t mid) const -> std::pair<str, str>;
-[[nodiscard]] constexpr auto split_at_checked(size_t mid) const noexcept -> Option<std::pair<str, str>>;
+    return self;
+}
 ```
 
-### B. Iteration — P1/P2
+`self` 是有名参数，返回 `Self&` 恒合法；完整表达式内链式调用安全
+（旧 `Self&&` 版本的 `auto&& x = make().inspect(f);` 悬垂与旧 Option
+版本的整份拷贝问题一并消除）。
+
+### 3.5 `and_` / `or_`（✅ DP-5，按统一规则修订）
+
+返回 `Option<T>` 按值（无法条件返回引用），按值类别决定来源：
+
+- 左值 self：**拷贝** self（或 optb）进结果，self 保持不变；
+- 右值 self：move 进结果并重置 self 为 `None`。
 
 ```cpp
-struct Bytes;        // value_type std::byte
-struct CharIndices;  // value_type std::pair<size_t, Char>
+template<typename Self>
+[[nodiscard]] auto or_(this Self&& self, Option<T> optb) -> Option<T>
+{
+    if (self.is_some())
+    {
+        return std::forward<Self>(self);  // 左值拷贝、右值 move（+重置）
+    }
 
-[[nodiscard]] constexpr auto bytes() const noexcept -> Bytes;              // P2
-[[nodiscard]] constexpr auto char_indices() const noexcept -> CharIndices; // P1
+    return optb;
+}
 ```
 
-### C. Split family — P1/P2
+`and_` / `or_else` 同理。与 Rust（无条件消费）的偏离在 Doxygen
+`@note` 标注。
+
+### 3.6 `replace` 参数改万能引用（✅ 用户决定）
+
+比按值省一次 move，且额外接受可转换到 `T` 的实参（如
+`Option<String>::replace("literal")`）：
 
 ```cpp
-// P1: unify + add char
-[[nodiscard]] constexpr auto split(…) const noexcept -> Split;
-[[nodiscard]] constexpr auto split_once(…) const noexcept -> Option<std::pair<str, str>>;
-[[nodiscard]] constexpr auto rsplit_once(…) const noexcept -> Option<std::pair<str, str>>;
-
-// P2
-[[nodiscard]] constexpr auto splitn(size_t n, …) const noexcept -> SplitN;          // Rust arg order
-[[nodiscard]] constexpr auto rsplitn(size_t n, …) const noexcept -> RSplitN;
-[[nodiscard]] constexpr auto rsplit(…) const noexcept -> RSplit;
-[[nodiscard]] constexpr auto split_terminator(…) const noexcept -> SplitTerminator;
-[[nodiscard]] constexpr auto rsplit_terminator(…) const noexcept -> RSplitTerminator;
-[[nodiscard]] constexpr auto split_inclusive(…) const noexcept -> SplitInclusive;
-[[nodiscard]] constexpr auto rsplit_inclusive(…) const noexcept -> RSplitInclusive;
-[[nodiscard]] constexpr auto split_whitespace() const noexcept -> SplitWhitespace;  // Unicode
+template<typename U>
+    requires std::convertible_to<U&&, T>
+auto replace(U&& t) noexcept(std::is_nothrow_assignable_v<T&, U&&>) -> Option<T>
 ```
 
-Semantics follow Rust exactly, including the easy-to-miss ones:
+取旧值返回 `Option<T>` 保持不变（对齐 Rust）。指针 / 引用特化仍按值收
+`T`（指针 trivially copyable，无转发收益）。`replace` 同时是"取出旧值
+的 owned `Option<T>`"这一模式的逃生口（见 3.2）。
 
-- `splitn(n, p)` yields at most `n` parts; the last part contains the remainder
-  **with** its separators.
-- `split_terminator` behaves like `split` but drops a trailing empty part when
-  the string ends with the separator.
-- `split_inclusive` keeps the separator on the part it terminates;
-  `rsplit*` variants yield parts in reverse order.
-- `split_whitespace` splits on runs of Unicode whitespace and yields no empty
-  parts (unlike `split(' ')`).
+### 3.7 `noexcept` 谎报
 
-### D. Search and match — P1/P2
+`ok` / `err` / `unzip` / `replace` / `unwrap_or*` 等内部构造 `T` 可能
+抛出却标了 `noexcept` → 直接 `std::terminate`。统一改为条件 noexcept
+（右值/拷贝路径 `noexcept(std::is_nothrow_move_constructible_v<T>)`
+等）。3.1 的左值引用路径可保留较强 noexcept。
+
+### 3.8 其他
+
+- 查询与转换类函数补 `[[nodiscard]]`（含引用特化的 `is_some` /
+  `is_none`）。
+- `unzip`（主模板）纳入统一值类别规则：左值拷贝两元素、右值 move 两
+  元素并重置 self 为 `None`。与 Rust（无条件消费）的偏离 `@note`
+  标注。
+
+## 4. 指针 / 引用特化
+
+### 4.1 指针特化 `expect` 的引用推导问题
 
 ```cpp
-// P1: char/const char* overloads
-[[nodiscard]] constexpr auto find(Char ch) const noexcept -> Option<size_t>;
-[[nodiscard]] constexpr auto rfind(Char ch) const noexcept -> Option<size_t>;
-[[nodiscard]] constexpr auto contains(const char* pattern) const noexcept -> bool;
-[[nodiscard]] constexpr auto contains(Char ch) const noexcept -> bool;
-[[nodiscard]] constexpr auto starts_with(const char* pattern) const noexcept -> bool;
-[[nodiscard]] constexpr auto starts_with(Char ch) const noexcept -> bool;
-[[nodiscard]] constexpr auto ends_with(const char* pattern) const noexcept -> bool;
-[[nodiscard]] constexpr auto ends_with(Char ch) const noexcept -> bool;
-
-// P2
-[[nodiscard]] constexpr auto match_indices(…) const noexcept -> MatchIndices;    // (index, matched slice)
-[[nodiscard]] constexpr auto rmatch_indices(…) const noexcept -> RMatchIndices;
-[[nodiscard]] constexpr auto strip_prefix(Char ch) const noexcept -> Option<str>;
-[[nodiscard]] constexpr auto strip_suffix(Char ch) const noexcept -> Option<str>;
+template<typename Self>
+[[nodiscard]] auto expect(this Self&& self, std::string_view msg) -> decltype(auto)
+{
+    if (self.is_some())
+    {
+        return self.ptr;   // ← 问题在这
+    }
+    panic(msg);
+}
 ```
 
-### E. Trim family — P1/P2
+返回类型是 **`decltype(auto)` 而非 `T`**。`self.ptr` 是左值表达式，
+decltype 推导为 `T&` —— 即 `int*&`，指向 **self.ptr 成员槽位**的引用，
+不是指针值。后果：临时对象上调用且绑定到引用时悬垂
+（`auto& p = Option<int*>{&x}.expect("m");`）；左值上返回的引用别名了
+槽位（之后 `opt.replace(q)` 会改变该引用本身）。`auto p = ...`（按值）
+恰好解引用拷贝出指针值，掩盖了签名问题；Doxygen `@return The pointer`
+同样误导。✅ 统一值类别规则后自然修复：`unwrap` / `expect` 一律返回
+`T` 按值（第 2 节第 5 条），左值不置空、右值置 `ptr = nullptr`。
 
-```cpp
-// P1: Unicode-aware, same definition of whitespace as Rust
-[[nodiscard]] auto trim() const noexcept -> str;
-[[nodiscard]] auto trim_start() const noexcept -> str;
-[[nodiscard]] auto trim_end() const noexcept -> str;
+（引用特化 `expect` 声明 `-> T`（`T = U&`），返回原对象引用 ✓ 正确，
+仅需右值路径配套置空指针。）
 
-// P1: bug fix — strip the full ASCII whitespace set and stop the wrap-around
-[[nodiscard]] auto trim_ascii() const noexcept -> str;
-[[nodiscard]] auto trim_ascii_start() const noexcept -> str;
-[[nodiscard]] auto trim_ascii_end() const noexcept -> str;
+### 4.2 `unzip` 补齐到特化（✅ 用户决定）
 
-// P2: char + predicate forms (in addition to the existing str form)
-[[nodiscard]] constexpr auto trim_start_matches(Char ch) const noexcept -> str;
-[[nodiscard]] constexpr auto trim_end_matches(Char ch) const noexcept -> str;
-[[nodiscard]] constexpr auto trim_matches(…) const noexcept -> str;
+指针 / 引用特化在 **pointee / 被引对象是二元 tuple-like** 时提供
+`unzip`（crab_cpp 扩展，Rust 借用形态无对应物）：
 
-template<typename Pred>
-    requires std::predicate<Pred, Char>
-[[nodiscard]] constexpr auto trim_matches(Pred pred) const noexcept -> str;
-// …same for trim_start_matches / trim_end_matches
-```
+- `Option<std::pair<int, int>*>` → `(Option<int*>, Option<int*>)`，
+  元素为 `addressof(pair.first)` / `addressof(pair.second)`；
+- `Option<std::pair<int, int>&>` → `(Option<int&>, Option<int&>)`。
 
-`trim_matches(pred)` is the only place a closure pattern is accepted; it avoids
-a general `Pattern` trait while covering the common "strip custom chars" case.
+推荐语义：**借用、非消费** —— 结果是指向 pointee 成员的借用，消费
+self（置空 ptr）没有意义，self 保持可用。这与主模板的值类别规则
+（右值才消费）方向一致但永远走借用分支，差异在 Doxygen 中标注。
+约束：`tuple_of_size_2<remove_pointer_t<T>>` /
+`tuple_of_size_2<remove_reference_t<T>>`。
 
-### F. Case and escaping — P2
+### 4.3 API 一致性矩阵（更新后）
 
-```cpp
-template<typename Alloc = std::allocator<std::byte>>
-[[nodiscard]] auto to_lowercase() const -> raw::String<Alloc>;   // Unicode simple mapping
+| 方法 | 主模板 | 指针特化 | 引用特化 |
+| --- | :-: | :-: | :-: |
+| `is_some` / `is_none` | ✓ | ✓ | ✓ |
+| `unwrap` / `expect` | ✓ | ✓（`-> T` 修复 4.1） | ✓ |
+| `unwrap_unchecked` | ✓ | ✓ | ✓ |
+| `unwrap_or` / `unwrap_or_else` / `unwrap_or_default` | P0 补齐 | 补齐 | `unwrap_or` / `unwrap_or_else` 补齐；不提供 `unwrap_or_default`（引用没有默认值） |
+| `map` | ✓ | ✓ | ✓ |
+| `and_then` / `or_else` / `filter` | P0 补齐 | 补齐 | 补齐 |
+| `map_or` / `map_or_else` | P0 补齐 / ✓ | 补齐 | 补齐 |
+| `and_` / `or_` | ✓ | ✓ | ✓ |
+| `inspect` | ✓ | ✓ | ✓ |
+| `replace` | ✓ | ✓ | ✓ |
+| `zip` / `unzip` | P1 补齐 / ✓ | `unzip` 补齐（借用式） | `unzip` 补齐（借用式） |
+| `as_ref` / `as_mut` | P1 补齐 | —（本身即指针语义） | — |
 
-template<typename Alloc = std::allocator<std::byte>>
-[[nodiscard]] auto to_uppercase() const -> raw::String<Alloc>;
+（take / `expect_take` / `take_if` / `take_or_*` 各行已随删除消失。）
 
-template<typename Alloc = std::allocator<std::byte>>
-[[nodiscard]] constexpr auto escape_default() const -> raw::String<Alloc>;
+### 4.4 长期（P2）
 
-template<typename Alloc = std::allocator<std::byte>>
-[[nodiscard]] constexpr auto escape_debug() const -> raw::String<Alloc>;
+用单一实现（mixin / CRTP 或统一存储 + 条件逻辑）消除三份手写拷贝 ——
+特化与主模板的漂移正是第 4 节问题的根源。新增 API 从第一天起要求三个
+特化同步交付。
 
-template<typename Alloc = std::allocator<std::byte>>
-[[nodiscard]] constexpr auto escape_unicode() const -> raw::String<Alloc>;
-```
+## 5. `Result<T, E>` — 语义不对齐清单
 
-**Case-mapping fidelity (documented limitation):** utf8proc only exposes
-*simple*, 1:1 case mappings (`utf8proc_tolower`/`utf8proc_toupper`). Rust's
-`to_uppercase` performs *full* mappings, so e.g. `"ß"` becomes `"SS"` in Rust
-but stays `"ß"` here. `to_lowercase` is essentially identical to Rust (the only
-common full-mapping case, `ẞ -> ß`, is also the simple mapping). We document the
-`to_uppercase` difference rather than hand-rolling a full mapping table.
-`to_ascii_*` (existing) is unaffected.
+### 5.1 `unwrap` / `expect` / `unwrap_err` / `expect_err`（✅ DP-1 修订版）
 
-`escape_default` follows Rust's `char::escape_default`: `\t`, `\r`, `\n`,
-`\\`, `\'`, `\"`; printable ASCII is kept; ASCII controls become `\xNN`;
-everything else becomes `\u{…}`. `escape_debug` additionally keeps printable
-non-ASCII (grapheme-extend handling is P3). `escape_unicode` escapes every
-non-ASCII scalar as `\u{…}`.
+按统一值类别规则：`unwrap` / `expect` 左值返回 `T&`（const →
+`const T&`）、右值 move-out 返回 `T`；`unwrap_err` / `expect_err` 对 `E`
+同理。旧 `decltype(auto)` 方案的两分支类型收敛问题随条件返回类型消除。
 
-### G. Conversion — P1
+**注意不对称性**：`Result` 无空状态，右值消费后 self 只能留 moved-from
+（无法像 Option 重置为 `None`），`@note` 标注。
 
-```cpp
-template<typename Alloc = std::allocator<std::byte>>
-[[nodiscard]] constexpr auto to_string() const -> raw::String<Alloc>;
+### 5.2 `ok()` / `err()`（既有隐患修复）
 
-// P3: lossy decode, on the owned type rather than on str
-//   raw::String<Alloc>::from_utf8_lossy(std::span<const std::byte> bytes) -> raw::String<Alloc>
-//   (replaces every invalid sequence with U+FFFD)
-```
+现状是**对左值也无条件 `std::move` 偷值**（`auto o = res.ok();` 掏空
+左值 res 但 `is_ok()` 仍为 true）——隐藏惊吓，且与统一值类别规则矛盾。
+**修正**：左值 → 拷贝构造 `Option<T>`（self 不变）；右值 → move 并将
+self 置 moved-from。同时修 `noexcept` 谎报、补 `[[nodiscard]]`。
+注意：既有代码若依赖"左值 `ok()` 偷值"的性能特征会多一次拷贝——
+迁移时对照 `tests/` 评估。
 
-### H. Supporting `Char` additions
+### 5.3 组合子（✅ DP-10）
 
-These are internal dependencies of the methods above but are useful on their
-own; `Char` already has all `is_ascii_*` predicates.
+`map` / `map_err` / `and_then` 与 Option 的 3.3 同题同解（左值回调拿
+`T&` / `E&`，右值拿 `T&&` / `E&&`）。`inspect` / `inspect_err` 回调恒
+拿 `T&` / `E&` 与借用定位一致 ✓。
 
-```cpp
-[[nodiscard]] constexpr auto is_whitespace() const noexcept -> bool;         // Unicode White_Space (§4.5)
-[[nodiscard]] constexpr auto len_utf8() const noexcept -> size_t;
-[[nodiscard]] constexpr auto encode_utf8(std::span<std::byte, 4> out) const noexcept -> size_t;
-[[nodiscard]] constexpr auto to_ascii_lowercase() const noexcept -> Char;
-[[nodiscard]] constexpr auto to_ascii_uppercase() const noexcept -> Char;
+### 5.4 `inspect` / `inspect_err`（✅ DP-4a）
 
-// replaces the existing std::bit_cast<Char>(codepoint) hack used in iterators
-[[nodiscard]] static constexpr auto from_u32_unchecked(std::uint32_t) noexcept -> Char;
-```
+由 `Self&&` 统一改为 `Self&`，与 3.4 同。
 
----
+### 5.5 `replace` 删除（✅ DP-6b）
 
-## 6. Non-goals
+Rust 的 `Result` 没有 `replace`，且现签名带 3.6 / 3.7 两处问题。直接
+删除，不留 extension。
 
-- A general `Pattern` trait / type-erased searcher.
-- `str` indexing (`s[0]`) and `Index` machinery.
-- Reversible (`DoubleEndedIterator`) versions of the existing iterators; the
-  `rsplit*` family provides reverse traversal explicitly instead. Making
-  `chars`/`lines`/`split` reversible is a possible follow-up.
-- `Range<usize>`-style arguments; `get(from, to)` is the C++ spelling.
-- Unicode full case mapping tables and normalization.
+### 5.6 `Result<T, void>` 不支持（✅ DP-9）
 
----
+不实现特化。文档化惯用法：unit 错误用 `Result<T, None>`（即
+`variant<T, monostate>`，今天就能用，`is_err()` 即"持有 monostate"），
+unit 值用 `Result<None, E>`。README 增加一节说明；可选提供别名
+`template<typename E> using UnitResult = Result<None, E>;`（是否提供，
+实现时定）。
 
-## 7. Testing plan
+## 6. 缺失功能清单（按优先级，更新后）
 
-Add to `tests/str.cpp`, one `TEST(StringTest, …)` per group, following the
-existing style (`literal::operator""_s`, `EXPECT_EQ`, `EXPECT_DEATH`):
+### 6.1 P0
 
-- boundaries: `get`/`split_at` on ASCII, multi-byte (`"你好"`), combining
-  marks; `get` returns `None` mid-codepoint; `split_at` panics mid-codepoint.
-- `char_indices`: byte offsets around multi-byte scalars; empty string.
-- split family: trailing/leading/consecutive separators, `n == 0`, `n` larger
-  than the number of parts, empty pattern, reverse variants.
-- `split_whitespace` vs `split(' ')` on mixed tabs/newlines.
-- `match_indices`/`rmatch_indices` on overlapping patterns.
-- trim: Unicode spaces (NBSP, `U+3000`), the all-whitespace `trim_ascii_end`
-  regression, non-boundary safety.
-- `to_string`, `escape_*`, `to_lowercase`/`to_uppercase` incl. a documented
-  `ß`/`ẞ` case.
-- char-pattern overloads for every operation touched, including the `char` vs
-  `const char*` overload resolution.
-
----
-
-## 8. Rollout
-
-| Phase | Contents | Rationale |
+| API | 归属 | 说明 |
 | --- | --- | --- |
-| 1 | §5A, §5B (`char_indices`), §5D char/`const char*` overloads, `split`/`split_once`/`rsplit_once`, `to_string`, `trim_ascii*` bug fix, §5H helpers | Unblocks the most common absent operations; fixes existing defects. |
-| 2 | §5C remaining split family, `match_indices`, Unicode `trim*` + `trim_matches`, `split_whitespace`, `escape_*`, `to_lowercase`/`to_uppercase` | Completes the "call it like Rust" surface. |
-| 3 | `bytes`, `encode_utf16`, `floor`/`ceil_char_boundary`, `from_utf8_lossy`, `len`/`is_empty` aliases, `Match` struct, reversible iterators | Parity polish. |
+| `unwrap_or` / `unwrap_or_else` / `unwrap_or_default` | Option, Result | 被删 take 家族的正式替换（值类别规则） |
+| `ok_or` / `ok_or_else` | Option | Option → Result 桥梁，目前完全缺失 |
+| `map_or` | Option, Result | `map_or_else` 已有，非闭包版缺失 |
+| `or_else` | Option, Result | 配合 `or_` |
+| `and_` | Result | Option 有、Result 没有 |
+| `filter` | Option | 替代被删的 `take_if` |
+| `is_some_and` / `is_ok_and` / `is_err_and` | Option, Result | 短路谓词 |
+| `contains` / `contains_err` | Result | |
+| `operator==` / `operator<=>` + `std::hash` | Option, Result | 见 6.4 | ✅ 已完成（2026-10-14，150 测试全绿）：hidden friend `==` / `<=>`（主模板委托 `std::variant`，指针特化比较指针值，引用特化比较被指对象），`std::hash` 特化（None/Ok/Err 区分 + 值哈希组合） |
 
-Each phase should land with its tests and a README section update.
+### 6.2 P1
 
-Phase 1 is **implemented** (`src/string.cppm`, `tests/str.cpp`): §5A, §5B
-(`char_indices`), §5D `char`/`const char*`/`raw::String` overloads,
-`split`/`split_once`/`rsplit_once`, `to_string`, the `trim_ascii*` fixes, §5H
-helpers, plus the §2 defects 5, 6 and 7 (iterator end sentinel, `split`
-trailing-empty, `lines` first-line/empty) and defensive `char`-pattern handling
-that keeps the encoded bytes owned by the iterator.
+| API | 归属 | 说明 |
+| --- | --- | --- |
+| `as_ref` / `as_mut` | Option, Result | **降回 P1**：左值 `unwrap` 已提供借用路径；`as_ref` 的剩余价值是产出可传递的 `Option<T&>` 对象 |
+| `get_or_insert` / `get_or_insert_with` / `insert` | Option | 惰性初始化族（Rust 1.83+ stable） |
+| `zip` | Option | 与 `unzip` 对称 |
+| `cloned` / `copied` | Option, Result | `Option<T&>` / `Option<T*>` → `Option<T>` |
+| `flatten` | Option, Result | `Option<Option<T>>` → `Option<T>` |
+| `unwrap_err_unchecked` | Result | 配合 DP-3 |
+| 特化补齐 | Option 指针/引用 | 见 4.3 矩阵（含 4.2 的 `unzip`） |
 
-Phase 2 is **implemented** (`src/string.cppm`, `tests/str.cpp`): the remaining
-§5C split family (`rsplit`, `splitn`/`rsplitn`, `split_terminator`/
-`rsplit_terminator`, `split_inclusive`/`rsplit_inclusive`, `split_whitespace`),
-`match_indices`/`rmatch_indices`, the Unicode `trim`/`trim_start`/`trim_end` and
-`trim_matches` family (including the `Char`/`char`/predicate forms of
-`trim_*_matches`), `escape_default`/`escape_debug`/`escape_unicode`, and
-`to_lowercase`/`to_uppercase`. The empty-pattern alignment from §4.6/§9 landed
-with it, and the existing tests were updated accordingly.
+### 6.3 P2
 
-Implementation notes:
+| API | 归属 | 说明 |
+| --- | --- | --- |
+| `iter` / `begin` / `end` | Option, Result | 支持 range-for |
+| `transpose` | Option, Result | `Option<Result<T, E>>` ↔ `Result<Option<T>, E>` |
+| `xor` | Option | 恰好一个 Some |
+| `some(T)` 工厂 | Option 自由函数 | `some(5)` |
+| `Ok` / `Err` 构造器 | Result | ✅ DP-8 已决定引入。两个方向：a) tag 类型 + 模板转换运算符，支持 `return Ok(5);`（依赖返回语境推导）b) `Ok<T>` / `Err<E>` 模板 tag（类比 `std::in_place_type`，`Ok<int>{5}`，更可控）。实现时二选一 |
+| `std::formatter` | Option, Result | Rust `Debug` 对应物；string 模块已有先例 |
+| 单一实现重构 | Option | 见 4.4 |
 
-- Every split variant is backed by one internal `split_state` (a direct port of
-  Rust's `SplitInternal`) plus a `pattern_searcher` that also models the empty
-  pattern as a match at every code point boundary. A single `Split` range exposes
-  all eight variants through constructor flags.
-- Rust has no `rsplit_inclusive`; the doc asks for it, so it is implemented as
-  `split_inclusive` iterated in reverse.
-- `escape_default` escapes ASCII controls (including DEL) as `\u{...}`, matching
-  `char::escape_default`; the `\xNN` form mentioned in §5F was incorrect.
-- `to_uppercase` uses utf8proc's simple 1:1 mapping, so `"ß".to_uppercase()` is
-  `U+1E9E` (`ẞ`) rather than Rust's full-mapping `"SS"`.
+### 6.4 比较与哈希
 
-The `str` test suite was expanded to cover empty subjects, empty patterns,
-non-matches, multi-byte boundaries, repeated/`n`-limited operations and
-`*_once` "only splits once" behaviour, which is how defects 5–7 were found.
+主模板经 `std::variant` 基类的隐式转换"碰巧"能用 `==` / `<`，但指针 /
+引用特化完全没有比较运算；`std::hash` 特化不存在（无法做
+`unordered_map` 的 key）；依赖基类转换是脆弱的隐式语义。
 
----
+**建议**：hidden friend 的 `operator==` / `operator<=>`（委托底层表示）
++ `std::hash` 特化，三个特化统一提供。
 
-## 9. Decisions and open questions
+## 7. 决策点汇总（2026-10-14 全部拍板）
 
-Resolved (Phase 1):
+| # | 问题 | 决定 |
+| --- | --- | --- |
+| 1 | `unwrap` / `expect` 返回语义 | **统一值类别规则**：左值 self 返回 `T&`（const → `const T&`）借用；右值 self 在函数内 move-out 返回 `T` 按值（不能是 `T&&` 纯转发，否则无法安全重置） |
+| 2 | take 家族 | **整体删除**（C++ 用值类别表达借用/消费，左值可直接借用 unwrap，无 Rust 的借用检查限制） |
+| 3 | `unwrap_unchecked` | `get_if` + 解引用，`None` 为 UB |
+| 4 | `inspect` 返回 | `Self&`（Option / Result 统一，作为借用式探针例外） |
+| 5 | `and_` / `or_` | 按统一值类别规则修订：左值拷贝进结果（self 不变），右值 move + 重置 |
+| 6 | `Result::replace` | 删除 |
+| 7 | take_* 与 unwrap_or_* 并存 | 并入 2：take 删除，`unwrap_or*` 家族补齐 |
+| 8 | `Ok` / `Err` 构造器糖 | 引入（P2；tag 形态二选一，见 6.3） |
+| 9 | `Result<T, void>` | 不支持，文档化 `Result<T, None>` / `Result<None, E>` 惯用法 |
+| 10 | 组合子 self 语义 | **与 unwrap 同一逻辑**（左值回调拿 `T&`，右值拿 `T&&`） |
+| 11 | 消费操作的后状态 | Option 重置为 `None`；Result 无空状态，留 moved-from 并 `@note` 标注 |
 
-1. **Plain `char` overloads** — **yes**, accept `s.split(',')`; `char` is treated
-   as its numeric value in `[0, 255]` and encoded as UTF-8 (exact for ASCII).
-2. **`replace_n` vs `replacen`** — keep the current `replace_n` name.
-3. **`to_uppercase` fidelity** — accept utf8proc's simple 1:1 mapping and
-   document the limitation (defers until the Unicode case methods land, P2).
-4. **`match_indices` value** — `std::pair<size_t, str>` (P2).
-5. **`matches` compat** — leave `matches` yielding `size_t`; do not align it to
-   Rust's `(index, slice)`. New `match_indices` (P2) will carry the richer shape.
+## 8. 实施顺序与破坏性变更
 
-Resolved (Phase 2):
+按依赖与风险排序，每步可独立提交。统一值类别规则使整个迁移的破坏面
+大幅缩小（左值用法全部保持不变）：
 
-- **Empty-pattern alignment** — **yes**, `find`/`rfind`/`matches`/`split` now
-  follow Rust (`Some(0)`, `Some(len)`, boundary matches, boundary split).
-- **`to_uppercase`/`to_lowercase`** — use utf8proc's simple mapping; the only
-  notable difference from Rust's full mapping is `"ß" -> "ẞ"` instead of `"SS"`.
+1. **`noexcept` / `[[nodiscard]]` 修正**（3.7 / 5.2）— ✅ 已完成
+   （2026-10-14，GCC 16.2 下 156 个测试全绿）。`codeStyle.md` 若被模板
+   覆盖需先恢复。
+2. **组合子值类别分路**（3.3 / 5.3：`map` / `and_then` / `map_or_else`）
+   — ✅ 已完成（2026-10-14，156 个测试全绿）。左值回调拿 `T&`，右值
+   回调拿 `T&&`。Result 的 `and_then` / `map_err` 同题同解一并完成。
+3. **`unwrap` / `expect` / `unwrap_unchecked` / `unwrap_err` /
+   `expect_err` 重写**（3.1 / 5.1，含 4.1 指针特化修复）— ✅ 已完成
+   （2026-10-14，156 个测试全绿）。新增 `internal::unwrap_ret_t` /
+   `internal::unwrap_noexcept_v` / `internal::unwrap_impl`，按统一值
+   类别规则重写：左值返回引用、右值 move-out + 置 None + 按值返回；
+   指针特化 `expect`/`unwrap`/`unwrap_unchecked` 修复 `decltype(auto)`
+   引用推导悬垂 bug（`-> T` 按值，右值置空）；引用特化右值置空。
+   `internal::unzip_first/second` 更名为 `unzip_option_first/second`。
+   **路线 A 重做**（2026-10-14 晚）：`unwrap` / `expect` /
+   `unwrap_unchecked` / `unwrap_err` / `expect_err` 全部改为 `-> T` /
+   `-> E` **按值返回**（左值拷贝、右值 move + 置 None），删除条件返回
+   类型 `unwrap_ret_t`，与 `unwrap_or` 家族签名统一。左值借用改走
+   `as_ref()`（→ `Option<const T&>`）/ `as_mut()`（→ `Option<T&>`），
+   复用引用特化，None 安全不悬垂。`MutexGuard`（move-only）等左值
+   `unwrap()` 的现有用法迁移为 `as_mut().unwrap()`。`Option` 和
+   `Result` 均新增 `as_ref()` / `as_mut()`（Result 返回
+   `Result<const T&, const E&>` / `Result<T&, E&>`）。
+4. **`ok()` / `err()` 左值停止偷值**（5.2）— ✅ 已完成（2026-10-14，
+   156 个测试全绿）。改为 deducing this + 值类别分路：左值拷贝、右值
+   move + moved-from。修复左值无条件 `std::move` 偷值的隐藏 bug。
+5. **P0 增量补齐**（6.1）— ✅ 已完成（2026-10-14，156 个测试全绿 +
+   smoke 验证）。新增 API（全部三处：主模板 / 指针特化 / 引用特化，及
+   Result）：`unwrap_or` / `unwrap_or_else` / `unwrap_or_default`（左值
+   返回 `T` 按值拷贝、右值 move-out + 重置为 None）、`ok_or` /
+   `ok_or_else`、`filter`、`or_else`、`and_`（Result）、`map_or`、
+   `is_some_and` / `is_ok_and` / `is_err_and`、`contains` /
+   `contains_err`。`Option` 的 `ok_or` / `ok_or_else` 经前向声明 +
+   透明守卫解决与 `:result` 的循环依赖。**设计修正**：`unwrap_or` 三
+   件套左值也返回 `T` 按值（左值 None 时返回左值引用会悬垂，C++ 无
+   Rust 借用检查，与 `map_or` 左值语义一致）；右值路径 Some 时亦重置为
+   None（DP-11 语义扩展至默认值族）。引用特化不提供
+   `unwrap_or_default`：返回类型是引用，None 分支没有可返回的默认对象。
+6. **take 家族 + `Result::replace` 删除**（3.2 / 5.5）— ✅ 已完成
+   （2026-10-14，150 个测试全绿）。删除 `take` / `take_if` /
+   `take_or_default` / `take_or_else` / `expect_take`（主模板 + 指针/
+   引用特化）及 `Result::replace`；`string.cppm` 的 `_S` 字面量迁移为
+   `std::move(...).expect(...)`；`tests/option.cpp` 删除 5 个 take 测试
+   块、`tests/result.cpp` 删除 `Replace` 测试。**测试修正**：
+   `StringTest.CopyConstructor` / `AssignmentOperator` 的
+   `EXPECT_EQ(s1.capacity(), s2.capacity())` 删除——旧 `unwrap` 返回
+   `T&` 时 `s1` 是拷贝构造（容量 16），新 `unwrap` 返回按值时 `s1`
+   是移动构造（容量 5），拷贝构造 `s2` 走 `+=` 得容量 16，二者本就不
+   相等（容量断言依赖旧的拷贝副作用）。
+7. **`inspect` 统一为 `Self&`**（3.4 / 5.4）— ✅ 已完成（2026-10-14，
+   150 个测试全绿）。指针特化 `inspect` 从 `Self`（拷贝返回）改为
+   `Self&`；`Result::inspect` / `inspect_err` 从 `Self&&` 改为 `Self&`，
+   消除 `auto&& x = make().inspect(f);` 悬垂与 Option 整份拷贝问题。
+8. **`and_` / `or_` 修订、`replace` 转发引用**（3.5 / 3.6）— ✅ 已完成
+   （2026-10-14，150 个测试全绿）。主模板 `or_` 改 deducing this +
+   值类别分路（左值拷贝进结果、右值 move + 重置为 None）；`and_` 同步；
+   `replace` 参数 `T&&` → 万能引用 `U&&`（`std::convertible_to<U&&, T>`
+   约束），额外接受可转换实参。Result 的 `and_` / `or_` 步骤 5 已消费化，
+   无需再改。
+9. **特化补齐 + 特化 `unzip`**（4.2 / 4.3）— ✅ 特化补齐已完成
+   （2026-10-14，150 个测试全绿）。指针 / 引用特化补齐 `and_then` /
+   `map_or_else`，至此两特化覆盖主模板全部组合子。特化 `unzip`（
+   借用式，tuple-like pointee）仍为开放项（P1 / 4.2）。
+10. P1 / P2 项（`as_ref`、`Ok` / `Err`、formatter、单一实现重构等）
+    按排期推进。
 
-Still open:
-
-- Whether to introduce a dedicated `Match` type instead of a pair (P3).
-
----
-
-## 10. String correctness fixes (test-driven)
-
-Reviewing `raw::String` while expanding `tests/string.cpp` surfaced five
-defects. All are fixed:
-
-1. **`from_raw_parts` allocated `len` but not `len + 1`.** It never wrote the
-   terminating `\0`, yet the destructor (and every other path) assumes
-   `capacity + 1` bytes are allocated. Fixed to allocate `len + 1` and write
-   the terminator. This affected `String::from`, `String::from_raw_parts` and
-   the `_S` literal.
-2. **`clear()` did not re-terminate.** It only reset `m_len`, leaving the old
-   first byte in place, so `c_str()` was not an empty C string. Fixed to write
-   `m_data[0] = '\0'` when a buffer exists.
-3. **The `String(View&&)` constructor wrote the terminator one byte too far**
-   (`m_data[i + 1]` instead of `m_data[i]`), so the view/`std::ranges::to<String>`
-   path produced a non-terminated string.
-4. **`split_off(at)` panicked for `at == len`.** Rust allows it (returning an
-   empty string and leaving `self` intact). Fixed to allow `at <= len` and to
-   handle an empty remainder.
-5. **Self-assignment lost the contents.** `operator=` called `clear()` before
-   appending `other`, so `s = s` emptied the string. Fixed with a `this != &other`
-   guard.
-
-`tests/string.cpp` gained edge cases for `split_off`/`truncate`/`pop`/`clear`/
-`reserve`/`push`/`+=`/construction (empty, boundary, multi-byte, out-of-range
-panic) plus a `FillingAllocator` that makes a missing terminator or allocation
-size mismatch fail deterministically instead of reading uninitialized memory.
-
----
-
-## 11. `str::c_str()` removal (review-driven)
-
-`str` is a non-owning view, so it cannot honour the NUL-termination contract that
-the name `c_str()` implies. For a sub-slice (`slice`, `strip_prefix`, `trim*`,
-`split().next()`, …) the pointer lands in the middle of the backing buffer, so
-`strlen(s.c_str())` returns the length of the parent's tail rather than the
-slice's.
-
-Resolved by removing `str::c_str()` entirely:
-
-- It was byte-for-byte identical to `str::as_raw()` and had no callers.
-- `raw::String::c_str()` is the only member that can guarantee termination (it
-  allocates `capacity + 1` and re-writes the terminator on every mutation), so it
-  stays.
-- `str::as_raw()` remains as the honest, non-terminating accessor, with a
-  documented `@note`; callers needing a C string use `to_std_string()` (or
-  `raw::String`).
-- This mirrors `std::string_view`, which deliberately provides no `c_str()`.
+需要同步修订的用户可见文档：`README.md`（unwrap / take 语义示例、
+`std::move(opt).unwrap()` 消费写法、`Result<T, None>` 惯用法一节）、
+`.agents/codeStructure.md`（方法清单）、`tests/`（take 用例改写为
+`std::move(opt).unwrap_or*`，`Result::replace` 用例删除）。
