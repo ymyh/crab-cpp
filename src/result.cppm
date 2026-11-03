@@ -96,19 +96,82 @@ namespace internal
         (sizeof...(Args) == 1 && (std::is_lvalue_reference_v<Args> && ...));
 
     /**
-     * @brief Storage for Result<T, E>
-     * @details Values live in variant<T, E>. If either alternative is an lvalue reference, that side is a
-     *          pointer and the other side is a pointer or an optional. A reference is never null while active.
-     *          Pointer values stay inside the variant: Ok(nullptr) is a real value.
+     * @brief Layout of a Result, specialized on whether an alternative is an lvalue reference
+     * @tparam AnyRef true when T or E is an lvalue reference
+     * @details Only the specializations for false and true are defined.
+     */
+    template<bool AnyRef, typename T, typename E>
+    struct result_repr;
+
+    /**
+     * @brief Layout of a Result that owns both alternatives
+     * @details Values live in variant<T, E>. Pointer values stay inside the variant: Ok(nullptr) is a
+     *          real value. A moved-from Result still holds its alternative.
      */
     template<typename T, typename E>
-    struct result_storage
+    struct result_repr<false, T, E>
+    {
+        std::variant<T, E> data;
+
+        constexpr result_repr() = default;
+
+        template<typename... Args>
+        constexpr result_repr(std::in_place_index_t<0>, Args&&... args)
+            : data(std::in_place_index<0>, std::forward<Args>(args)...)
+        {
+        }
+
+        template<typename... Args>
+        constexpr result_repr(std::in_place_index_t<1>, Args&&... args)
+            : data(std::in_place_index<1>, std::forward<Args>(args)...)
+        {
+        }
+
+        constexpr result_repr(const result_repr&)
+            requires (std::is_copy_constructible_v<std::variant<T, E>>) = default;
+
+        constexpr result_repr(const result_repr&)
+            requires (!std::is_copy_constructible_v<std::variant<T, E>>) = delete;
+
+        constexpr result_repr(result_repr&&) = default;
+
+        constexpr auto operator=(const result_repr&) -> result_repr&
+            requires (std::is_copy_assignable_v<std::variant<T, E>>) = default;
+
+        constexpr auto operator=(const result_repr&) -> result_repr&
+            requires (!std::is_copy_assignable_v<std::variant<T, E>>) = delete;
+
+        constexpr auto operator=(result_repr&&) -> result_repr& = default;
+
+        [[nodiscard]] constexpr auto is_ok() const noexcept -> bool
+        {
+            return this->data.index() == 0;
+        }
+
+        template<typename Self>
+        [[nodiscard]] constexpr auto get_ok(this Self&& self) -> decltype(auto)
+        {
+            return std::get<0>(std::forward<Self>(self).data);
+        }
+
+        template<typename Self>
+        [[nodiscard]] constexpr auto get_err(this Self&& self) -> decltype(auto)
+        {
+            return std::get<1>(std::forward<Self>(self).data);
+        }
+    };
+
+    /**
+     * @brief Layout of a Result with at least one lvalue-reference alternative
+     * @details A reference side is stored as a pointer and the other side is a pointer or an optional.
+     *          A reference is never null while active.
+     */
+    template<typename T, typename E>
+    struct result_repr<true, T, E>
     {
         static constexpr bool t_is_ref = std::is_lvalue_reference_v<T>;
 
         static constexpr bool e_is_ref = std::is_lvalue_reference_v<E>;
-
-        static constexpr bool any_ref = t_is_ref || e_is_ref;
 
         using ok_store = std::conditional_t<
             t_is_ref,
@@ -122,109 +185,94 @@ namespace internal
             std::optional<E>
         >;
 
-        struct value_repr
+        bool ok = false;
+
+        ok_store ok_slot{};
+
+        err_store err_slot{};
+
+        static constexpr bool copyable =
+            std::is_copy_constructible_v<ok_store> && std::is_copy_constructible_v<err_store>;
+
+        static constexpr bool copy_assignable =
+            std::is_copy_assignable_v<ok_store> && std::is_copy_assignable_v<err_store>;
+
+        constexpr result_repr() = default;
+
+        template<typename... Args>
+        constexpr result_repr(std::in_place_index_t<0>, Args&&... args)
+            : ok(true)
         {
-            std::variant<T, E> data;
-
-            constexpr value_repr() = default;
-
-            template<typename... Args>
-            constexpr value_repr(std::in_place_index_t<0>, Args&&... args)
-                : data(std::in_place_index<0>, std::forward<Args>(args)...)
+            if constexpr (t_is_ref)
             {
-            }
-
-            template<typename... Args>
-            constexpr value_repr(std::in_place_index_t<1>, Args&&... args)
-                : data(std::in_place_index<1>, std::forward<Args>(args)...)
-            {
-            }
-
-            constexpr value_repr(const value_repr&) = default;
-
-            constexpr value_repr(value_repr&&) = default;
-
-            constexpr auto operator=(const value_repr&) -> value_repr& = default;
-
-            constexpr auto operator=(value_repr&&) -> value_repr& = default;
-        };
-
-        struct ref_repr
-        {
-            bool ok = false;
-
-            ok_store ok_slot{};
-
-            err_store err_slot{};
-        };
-
-        using repr_t = std::conditional_t<any_ref, ref_repr, value_repr>;
-
-        repr_t m_repr;
-
-        constexpr result_storage(const result_storage&) = default;
-
-        constexpr result_storage(result_storage&&) = default;
-
-        constexpr auto operator=(const result_storage&) -> result_storage& = default;
-
-        constexpr auto operator=(result_storage&&) -> result_storage& = default;
-
-        template<std::size_t I, typename... Args>
-        constexpr result_storage(std::in_place_index_t<I>, Args&&... args)
-            : m_repr(make_repr(std::in_place_index<I>, std::forward<Args>(args)...))
-        {
-        }
-
-        [[nodiscard]] constexpr auto is_ok() const noexcept -> bool
-        {
-            if constexpr (any_ref)
-            {
-                return this->m_repr.ok;
+                static_assert(sizeof...(Args) == 1);
+                ok_slot = bind_ref(std::forward<Args>(args)...);
             }
             else
             {
-                return this->m_repr.data.index() == 0;
+                ok_slot.emplace(std::forward<Args>(args)...);
             }
+        }
+
+        template<typename... Args>
+        constexpr result_repr(std::in_place_index_t<1>, Args&&... args)
+            : ok(false)
+        {
+            if constexpr (e_is_ref)
+            {
+                static_assert(sizeof...(Args) == 1);
+                err_slot = bind_ref(std::forward<Args>(args)...);
+            }
+            else
+            {
+                err_slot.emplace(std::forward<Args>(args)...);
+            }
+        }
+
+        constexpr result_repr(const result_repr&)
+            requires (copyable) = default;
+
+        constexpr result_repr(const result_repr&)
+            requires (!copyable) = delete;
+
+        constexpr result_repr(result_repr&&) = default;
+
+        constexpr auto operator=(const result_repr&) -> result_repr&
+            requires (copy_assignable) = default;
+
+        constexpr auto operator=(const result_repr&) -> result_repr&
+            requires (!copy_assignable) = delete;
+
+        constexpr auto operator=(result_repr&&) -> result_repr& = default;
+
+        [[nodiscard]] constexpr auto is_ok() const noexcept -> bool
+        {
+            return this->ok;
         }
 
         template<typename Self>
         [[nodiscard]] constexpr auto get_ok(this Self&& self) -> decltype(auto)
         {
-            if constexpr (any_ref)
+            if constexpr (t_is_ref)
             {
-                if constexpr (t_is_ref)
-                {
-                    return *self.m_repr.ok_slot;
-                }
-                else
-                {
-                    return *std::forward<Self>(self).m_repr.ok_slot;
-                }
+                return *self.ok_slot;
             }
             else
             {
-                return std::get<0>(std::forward<Self>(self).m_repr.data);
+                return *std::forward<Self>(self).ok_slot;
             }
         }
 
         template<typename Self>
         [[nodiscard]] constexpr auto get_err(this Self&& self) -> decltype(auto)
         {
-            if constexpr (any_ref)
+            if constexpr (e_is_ref)
             {
-                if constexpr (e_is_ref)
-                {
-                    return *self.m_repr.err_slot;
-                }
-                else
-                {
-                    return *std::forward<Self>(self).m_repr.err_slot;
-                }
+                return *self.err_slot;
             }
             else
             {
-                return std::get<1>(std::forward<Self>(self).m_repr.data);
+                return *std::forward<Self>(self).err_slot;
             }
         }
 
@@ -235,49 +283,62 @@ namespace internal
             static_assert(std::is_lvalue_reference_v<U>, "Result reference alternatives bind an lvalue");
             return std::addressof(value);
         }
+    };
+
+    /**
+     * @brief Storage for Result<T, E>
+     * @details Delegates the layout to result_repr and keeps the reference flags visible to Result.
+     */
+    template<typename T, typename E>
+    struct result_storage
+    {
+        static constexpr bool t_is_ref = std::is_lvalue_reference_v<T>;
+
+        static constexpr bool e_is_ref = std::is_lvalue_reference_v<E>;
+
+        static constexpr bool any_ref = t_is_ref || e_is_ref;
+
+        using repr_t = result_repr<any_ref, T, E>;
+
+        repr_t m_repr;
+
+        constexpr result_storage(const result_storage&)
+            requires (std::is_copy_constructible_v<repr_t>) = default;
+
+        constexpr result_storage(const result_storage&)
+            requires (!std::is_copy_constructible_v<repr_t>) = delete;
+
+        constexpr result_storage(result_storage&&) = default;
+
+        constexpr auto operator=(const result_storage&) -> result_storage&
+            requires (std::is_copy_assignable_v<repr_t>) = default;
+
+        constexpr auto operator=(const result_storage&) -> result_storage&
+            requires (!std::is_copy_assignable_v<repr_t>) = delete;
+
+        constexpr auto operator=(result_storage&&) -> result_storage& = default;
 
         template<std::size_t I, typename... Args>
-        static constexpr auto make_repr(std::in_place_index_t<I>, Args&&... args) -> repr_t
+        constexpr result_storage(std::in_place_index_t<I>, Args&&... args)
+            : m_repr(std::in_place_index<I>, std::forward<Args>(args)...)
         {
-            if constexpr (any_ref)
-            {
-                ref_repr repr{};
+        }
 
-                if constexpr (I == 0)
-                {
-                    repr.ok = true;
+        [[nodiscard]] constexpr auto is_ok() const noexcept -> bool
+        {
+            return this->m_repr.is_ok();
+        }
 
-                    if constexpr (t_is_ref)
-                    {
-                        static_assert(sizeof...(Args) == 1);
-                        repr.ok_slot = bind_ref(std::forward<Args>(args)...);
-                    }
-                    else
-                    {
-                        repr.ok_slot.emplace(std::forward<Args>(args)...);
-                    }
-                }
-                else
-                {
-                    repr.ok = false;
+        template<typename Self>
+        [[nodiscard]] constexpr auto get_ok(this Self&& self) -> decltype(auto)
+        {
+            return std::forward<Self>(self).m_repr.get_ok();
+        }
 
-                    if constexpr (e_is_ref)
-                    {
-                        static_assert(sizeof...(Args) == 1);
-                        repr.err_slot = bind_ref(std::forward<Args>(args)...);
-                    }
-                    else
-                    {
-                        repr.err_slot.emplace(std::forward<Args>(args)...);
-                    }
-                }
-
-                return repr;
-            }
-            else
-            {
-                return value_repr(std::in_place_index<I>, std::forward<Args>(args)...);
-            }
+        template<typename Self>
+        [[nodiscard]] constexpr auto get_err(this Self&& self) -> decltype(auto)
+        {
+            return std::forward<Self>(self).m_repr.get_err();
         }
     };
 
@@ -371,11 +432,27 @@ public:
     {
     }
 
-    constexpr Result(const Result&) = default;
+    /**
+     * @brief Copy-constructs when the storage itself can be copied
+     * @note The two overloads are mutually exclusive: move-only alternatives select the deleted one.
+     */
+    constexpr Result(const Result&)
+        requires (std::is_copy_constructible_v<storage>) = default;
+
+    constexpr Result(const Result&)
+        requires (!std::is_copy_constructible_v<storage>) = delete;
 
     constexpr Result(Result&&) = default;
 
-    constexpr auto operator=(const Result&) -> Result& = default;
+    /**
+     * @brief Copy-assigns when the storage itself can be copy-assigned
+     * @note The two overloads are mutually exclusive: move-only alternatives select the deleted one.
+     */
+    constexpr auto operator=(const Result&) -> Result&
+        requires (std::is_copy_assignable_v<storage>) = default;
+
+    constexpr auto operator=(const Result&) -> Result&
+        requires (!std::is_copy_assignable_v<storage>) = delete;
 
     constexpr auto operator=(Result&&) -> Result& = default;
 

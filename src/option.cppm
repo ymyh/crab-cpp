@@ -352,11 +352,27 @@ private:
 public:
     constexpr Option() noexcept = default;
 
-    constexpr Option(const Option&) = default;
+    /**
+     * @brief Copy-constructs when the storage itself can be copied
+     * @note The two overloads are mutually exclusive: a move-only T selects the deleted one.
+     */
+    constexpr Option(const Option&)
+        requires (std::is_copy_constructible_v<storage>) = default;
+
+    constexpr Option(const Option&)
+        requires (!std::is_copy_constructible_v<storage>) = delete;
 
     constexpr Option(Option&&) = default;
 
-    constexpr auto operator=(const Option&) -> Option& = default;
+    /**
+     * @brief Copy-assigns when the storage itself can be copy-assigned
+     * @note The two overloads are mutually exclusive: a move-only T selects the deleted one.
+     */
+    constexpr auto operator=(const Option&) -> Option&
+        requires (std::is_copy_assignable_v<storage>) = default;
+
+    constexpr auto operator=(const Option&) -> Option&
+        requires (!std::is_copy_assignable_v<storage>) = delete;
 
     constexpr auto operator=(Option&&) -> Option& = default;
 
