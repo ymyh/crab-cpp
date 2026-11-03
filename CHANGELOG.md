@@ -154,3 +154,30 @@ is copied and is not cleared. `inspect` always borrows.
 - Option and Result matrix tests (`tests/option_matrix.inl`,
   `tests/result_matrix.inl`, `tests/probe_types.h`) exercise copy, move, pointer,
   and reference types across lvalue, const lvalue, rvalue, and const rvalue.
+
+# 0.4.1
+
+_Released 2026-11-03._
+
+## Changed
+
+### `Option<T>` and `Result<T, E>`
+
+- The copy constructor and copy assignment are now a constrained `= default` /
+  `= delete` pair instead of a single `= default`. The constraint is written on the
+  storage, so pointer and lvalue-reference layouts keep their copies while a move-only
+  value selects the deleted overload. Copyability, assignability, triviality, and
+  runtime behaviour are unchanged; the diagnostics now name the deleted overload and
+  the failed constraint instead of following an implicit deletion chain through the
+  storage and `std::variant`.
+
+## Internal
+
+- `internal::result_storage` no longer nests `value_repr` / `ref_repr`. Both became
+  specializations of `internal::result_repr<bool AnyRef, T, E>`, each owning its
+  `in_place_index` constructors, `is_ok`, `get_ok`, and `get_err`, and `result_storage`
+  is now a thin forwarding layer. Selecting the layout by template argument also removes
+  the `if constexpr (any_ref)` dispatch that every accessor used to repeat. `result_repr`
+  and `result_storage` use the same constrained `= default` / `= delete` pair as the
+  public types.
+
