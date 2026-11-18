@@ -11,6 +11,7 @@
     - [Option \<T\>](#option-t)
     - [Result \<T, E\>](#result-t-e)
     - [match](#match)
+    - [CRAB\_TRY \& CRAB\_TRY\_VOID](#crab_try--crab_try_void)
     - [Mutex \<T\>](#mutex-t)
     - [Char \& str \& String (Optional feature)](#char--str--string-optional-feature)
   - [Why Crab\_cpp ?](#why-crab_cpp-)
@@ -177,6 +178,7 @@ One method stands for each family. The others differ only in which side they tou
 - `insert`, and likewise `get_or_insert`, `get_or_insert_with`, and `get_or_insert_default`. Value options only, and only on an lvalue. The returned `T&` refers to the value stored in the option. Pointer and reference options do not own a `T`, so these methods are not provided. `get_or_insert_default` also requires `T` to be default-constructible.
 - `as_ref`, and `as_mut`. Value options only, lvalue only. They borrow the contained value as `Option<const T&>` or `Option<T&>`.
 - `ok_or`, and `ok_or_else`. `Some` becomes Ok. `None` becomes Err.
+- `Option(const std::optional<U>&)` / `Option(std::optional<U>&&)` and `to_std()` convert between `Option` and `std::optional` (value and pointer options only; reference options are excluded because C++23 `std::optional` has no reference storage).
 - `==` and `<=>`. `None` is less than `Some`. `std::hash<Option<T>>` mixes a Some/None tag with the value hash, so `None` and `Some(0)` do not collide. References hash the referent. Pointers hash the address.
 
 An operand that is copied or moved is taken before either side is reset. Writing `std::move(opt).and_(opt)` therefore still observes the value.
@@ -230,9 +232,9 @@ int main()
 - `is_ok`. `is_err` is the complement.
 - `contains`. `contains_err` checks the error. A reference alternative compares the referent.
 - `is_ok_and`. `is_err_and` checks the error. Neither call consumes the result.
-- `unwrap`, and likewise `expect` and `unwrap_unchecked`. The error side is `unwrap_err` and `expect_err`.
+- `unwrap`, and likewise `expect` and `unwrap_unchecked`. The error side is `unwrap_err`, `expect_err`, and `unwrap_err_unchecked`.
 - `unwrap_or`, and likewise `unwrap_or_else` and `unwrap_or_default`. `unwrap_or_default` is not provided when `T` is a reference.
-- `map`. The callback returns the new Ok value and the error type stays `E`. `map_err` maps the error instead. `map_or` returns a plain `U`, using the fallback on Err.
+- `map`. The callback returns the new Ok value and the error type stays `E`. `map_err` maps the error instead. `map_or`, `map_or_else`, and `map_or_default` return a plain `U`, using a fallback value, error closure, or `U{}` on Err.
 - `and_then`. The callback receives the Ok value and returns a `Result`.
 - `and_`. Ok returns the other result, so the Ok type may change. Err keeps `E`.
 - `or_`. Ok keeps `T` and the error type may change. Err returns the other result. `or_else` builds that result from the error.
@@ -241,6 +243,7 @@ int main()
 - `ok`. `err` is the error side. An lvalue copies into an `Option`. A non-const rvalue moves. The `Result` stays on its alternative.
 - `as_ref`, and `as_mut`. Lvalue only. They borrow whichever alternative is active.
 - `visit` calls the visitor with the Ok value or the Err value, and does not empty the result.
+- `Result(const std::expected<U, G>&)` / `Result(std::expected<U, G>&&)` (including `std::expected<void, G>` for `Result<None, E>`), `Result(std::unexpected<G>)`, and `to_std()` convert between `Result` and `std::expected` (non-reference alternatives only).
 - `==` and `<=>`. Ok is less than Err. `std::hash<Result<T, E>>` mixes an Ok/Err tag with the active value. References hash the referent.
 
 #### match
@@ -251,6 +254,25 @@ The `match` macro lives in a header, because a macro cannot cross a module bound
 ```
 
 `match (expr) { lambdas }` builds an overload set from the lambdas and visits the argument. One lambda handles each alternative, as in the `Option` and `Result` samples above. The arms must return the same type when the result is used.
+
+If the unprefixed `match` macro conflicts with identifiers in your codebase, use `CRAB_MATCH(...)` and define `CRAB_CPP_NO_SHORT_MACROS` before including `"crab_cpp/macros.h"` to suppress `match`.
+
+#### CRAB_TRY & CRAB_TRY_VOID
+`"crab_cpp/macros.h"` also provides `CRAB_TRY(decl, expr)` and `CRAB_TRY_VOID(expr)` for Rust-like early return on `Option` and `Result` (standard C++23, portable across GCC, Clang, and MSVC):
+
+```c++
+#include "crab_cpp/macros.h"
+import crab_cpp;
+
+auto compute(Result<int, std::string> a, Result<int, std::string> b) -> Result<int, std::string>
+{
+    CRAB_TRY(auto x, a);
+    CRAB_TRY(auto y, std::move(b));
+    return x + y;
+}
+```
+
+`expr` is evaluated once and follows the library's value-category rules (lvalues borrow/copy; rvalues move). `CRAB_TRY_VOID(expr)` checks for `None` / `Err` and returns early while discarding the success value.
 
 #### Mutex &lt;T&gt;
 `Mutex<T>` owns a `T` guarded by `std::mutex`, in the shape of Rust's `std::sync::Mutex`. It does not implement poisoning: a panic on another thread does not poison the lock. `lock` blocks and returns a `MutexGuard<T>`. `try_lock` returns `Option<MutexGuard<T>>`. The guard releases the lock when it is destroyed. `operator*` and `operator->` reach the protected value. The guard must not outlive the mutex. `into_inner` on an rvalue consumes the mutex and returns `T`. `get_mut` returns `T&` without locking; the caller must already have exclusive access.
