@@ -296,6 +296,83 @@ TEST(StringTest, AssignmentOperator)
     EXPECT_EQ(s1, s2);
 }
 
+TEST(StringTest, MoveAssignmentOperator)
+{
+    using namespace literal;
+
+    static_assert(std::is_nothrow_move_assignable_v<String>);
+
+    String s1 = "hello world"_S;
+    const auto* original_ptr = s1.data();
+    const auto original_cap = s1.capacity();
+
+    String s2 = "previous value"_S;
+    s2 = std::move(s1);
+
+    EXPECT_EQ(s2.data(), original_ptr);
+    EXPECT_EQ(s2.capacity(), original_cap);
+    EXPECT_EQ(s2, "hello world"_s);
+    expect_terminated(s2);
+
+    EXPECT_EQ(s1.data(), nullptr);
+    EXPECT_EQ(s1.size(), 0u);
+    EXPECT_EQ(s1.capacity(), 0u);
+    EXPECT_TRUE(s1.empty());
+
+    // Self move-assignment must keep contents intact
+    String& alias = s2;
+    s2 = std::move(alias);
+    EXPECT_EQ(s2, "hello world"_s);
+    expect_terminated(s2);
+
+    // Stateful non-POCMA allocator: unequal allocators fall back to copy, equal allocators steal
+    struct ArenaAlloc
+    {
+        using value_type = std::byte;
+        using propagate_on_container_move_assignment = std::false_type;
+        using is_always_equal = std::false_type;
+
+        int id = 0;
+
+        explicit ArenaAlloc(int id) noexcept : id(id) {}
+
+        [[nodiscard]] auto allocate(std::size_t n) -> std::byte*
+        {
+            return static_cast<std::byte*>(::operator new(n));
+        }
+
+        auto deallocate(std::byte* p, std::size_t) noexcept -> void
+        {
+            ::operator delete(p);
+        }
+
+        [[nodiscard]] auto operator==(const ArenaAlloc& other) const noexcept -> bool
+        {
+            return this->id == other.id;
+        }
+    };
+
+    using AString = raw::String<ArenaAlloc>;
+    static_assert(!std::is_nothrow_move_assignable_v<AString>);
+
+    AString a = AString::from("alpha", ArenaAlloc(1)).unwrap();
+    AString b = AString::from("beta", ArenaAlloc(2)).unwrap();
+    const auto* b_ptr = b.data();
+    a = std::move(b);
+    EXPECT_EQ(a, "beta"_s);
+    EXPECT_NE(a.data(), b_ptr);
+    EXPECT_EQ(b, "beta"_s);
+    expect_terminated(a);
+
+    AString c = AString::from("gamma", ArenaAlloc(1)).unwrap();
+    const auto* c_ptr = c.data();
+    a = std::move(c);
+    EXPECT_EQ(a, "gamma"_s);
+    EXPECT_EQ(a.data(), c_ptr);
+    EXPECT_EQ(c.data(), nullptr);
+    expect_terminated(a);
+}
+
 TEST(StringTest, PlusEqualsOperator)
 {
     using namespace literal;

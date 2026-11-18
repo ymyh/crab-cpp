@@ -32,7 +32,7 @@ struct compressed_pair<T1, T2, false>
     T1 _first;
     T2 second;
 
-    constexpr compressed_pair(T1& x, const T2& y) noexcept : _first(x), second(y) {}
+    constexpr compressed_pair(const T1& x, const T2& y) noexcept : _first(x), second(y) {}
 
     [[nodiscard]] constexpr auto first() noexcept -> T1& { return this->_first; }
     [[nodiscard]] constexpr auto first() const noexcept -> const T1& { return this->_first; }
@@ -4548,7 +4548,13 @@ private:
 
 // constructors
 public:
-    constexpr explicit String(const Alloc& alloc = Alloc()) noexcept : m_data(nullptr), m_len(0), m_alloc_and_capacity(alloc, 0) {}
+    constexpr String() noexcept(std::is_nothrow_default_constructible_v<Alloc>)
+        requires std::default_initializable<Alloc>
+        : m_data(nullptr), m_len(0), m_alloc_and_capacity(Alloc(), 0)
+    {
+    }
+
+    constexpr explicit String(const Alloc& alloc) noexcept : m_data(nullptr), m_len(0), m_alloc_and_capacity(alloc, 0) {}
 
     constexpr String(const str& str, const Alloc& alloc = Alloc()) : String(alloc)
     {
@@ -4973,6 +4979,78 @@ public:
     auto operator=(const String& other) -> String&
     {
         if (this != &other)
+        {
+            this->clear();
+            (*this) += other;
+        }
+
+        return *this;
+    }
+
+    /**
+     * @brief Move-assigns another String into this String
+     * @param other The String to move from
+     * @return A reference to this String
+     */
+    auto operator=(String&& other)
+        noexcept(
+            std::allocator_traits<Alloc>::propagate_on_container_move_assignment::value ||
+            std::allocator_traits<Alloc>::is_always_equal::value
+        ) -> String&
+    {
+        if (this == std::addressof(other))
+        {
+            return *this;
+        }
+
+        using traits = std::allocator_traits<Alloc>;
+        constexpr bool pocma = traits::propagate_on_container_move_assignment::value;
+        constexpr bool always_equal = traits::is_always_equal::value;
+
+        if constexpr (pocma || always_equal)
+        {
+            if (this->m_data != nullptr)
+            {
+                traits::deallocate(
+                    this->m_alloc_and_capacity.first(),
+                    this->m_data,
+                    this->m_alloc_and_capacity.second + 1
+                );
+            }
+
+            if constexpr (pocma)
+            {
+                this->m_alloc_and_capacity.first() = std::move(other.m_alloc_and_capacity.first());
+            }
+
+            this->m_data = other.m_data;
+            this->m_len = other.m_len;
+            this->m_alloc_and_capacity.second = other.m_alloc_and_capacity.second;
+
+            other.m_data = nullptr;
+            other.m_len = 0;
+            other.m_alloc_and_capacity.second = 0;
+        }
+        else if (this->m_alloc_and_capacity.first() == other.m_alloc_and_capacity.first())
+        {
+            if (this->m_data != nullptr)
+            {
+                traits::deallocate(
+                    this->m_alloc_and_capacity.first(),
+                    this->m_data,
+                    this->m_alloc_and_capacity.second + 1
+                );
+            }
+
+            this->m_data = other.m_data;
+            this->m_len = other.m_len;
+            this->m_alloc_and_capacity.second = other.m_alloc_and_capacity.second;
+
+            other.m_data = nullptr;
+            other.m_len = 0;
+            other.m_alloc_and_capacity.second = 0;
+        }
+        else
         {
             this->clear();
             (*this) += other;
