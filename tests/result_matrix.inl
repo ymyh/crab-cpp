@@ -276,6 +276,11 @@ void exercise_result()
                     {
                         auto fresh = h.err(3);
                         EXPECT_EQ(crab_test::read_id<E>(crab_test::forward_like<decltype(res)>(fresh).expect_err("boom")), 3);
+                        auto unchecked = h.err(3);
+                        EXPECT_EQ(
+                            crab_test::read_id<E>(crab_test::forward_like<decltype(res)>(unchecked).unwrap_err_unchecked()),
+                            3
+                        );
                     }
                 }
             }
@@ -409,6 +414,36 @@ void exercise_result()
                 auto for_or = is_ok ? h.ok(42) : h.err(3);
                 EXPECT_EQ(
                     crab_test::forward_like<decltype(res)>(for_or).map_or(0, [](const auto& value) {
+                        return crab_test::read_id<T>(value);
+                    }),
+                    is_ok ? 42 : 0
+                );
+
+                auto for_else = is_ok ? h.ok(42) : h.err(3);
+                int else_cat = 0;
+                EXPECT_EQ(
+                    crab_test::forward_like<decltype(res)>(for_else).map_or_else(
+                        [&](auto&& err)
+                        {
+                            else_cat = std::is_lvalue_reference_v<decltype(err)> ? 1 : 2;
+
+                            return crab_test::read_id<E>(err) + 100;
+                        },
+                        [&](auto&& value)
+                        {
+                            else_cat = std::is_lvalue_reference_v<decltype(value)> ? 1 : 2;
+
+                            return crab_test::read_id<T>(value);
+                        }
+                    ),
+                    is_ok ? 42 : 103
+                );
+                const bool else_ref = is_ok ? std::is_lvalue_reference_v<T> : std::is_lvalue_reference_v<E>;
+                EXPECT_EQ(else_cat, (else_ref || acc::is_lvalue) ? 1 : 2);
+
+                auto for_default = is_ok ? h.ok(42) : h.err(3);
+                EXPECT_EQ(
+                    crab_test::forward_like<decltype(res)>(for_default).map_or_default([](const auto& value) {
                         return crab_test::read_id<T>(value);
                     }),
                     is_ok ? 42 : 0

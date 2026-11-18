@@ -918,4 +918,94 @@ TEST(OptionTest, Insert)
     EXPECT_EQ(calls, 0);
 }
 
+TEST(OptionTest, StdOptionalConversion)
+{
+    // From const std::optional&
+    const std::optional<std::string> src_some = "hello";
+    Option<std::string> from_lval = src_some;
+    EXPECT_TRUE(from_lval.is_some());
+    EXPECT_EQ(from_lval.unwrap(), "hello");
+    EXPECT_EQ(*src_some, "hello");
+
+    const std::optional<std::string> src_none = std::nullopt;
+    Option<std::string> from_empty = src_none;
+    EXPECT_TRUE(from_empty.is_none());
+
+    // From std::optional&& (including move-only)
+    std::optional<std::unique_ptr<int>> ptr_opt = std::make_unique<int>(42);
+    Option<std::unique_ptr<int>> moved_in = std::move(ptr_opt);
+    ASSERT_TRUE(moved_in.is_some());
+    EXPECT_EQ(*std::move(moved_in).unwrap(), 42);
+
+    // Converting between compatible element types & explicitness
+    struct ExplicitBox
+    {
+        int v = 0;
+        explicit ExplicitBox(int v) : v(v) {}
+    };
+    static_assert(std::is_constructible_v<Option<ExplicitBox>, std::optional<int>>);
+    static_assert(!std::is_convertible_v<std::optional<int>, Option<ExplicitBox>>);
+
+    Option<ExplicitBox> boxed(std::optional<int>(7));
+    EXPECT_EQ(boxed.unwrap().v, 7);
+
+    // Pointer option treats nullptr inside std::optional<T*> as None
+    int slot = 9;
+    Option<int*> ptr_some = std::optional<int*>(&slot);
+    EXPECT_TRUE(ptr_some.is_some());
+    EXPECT_EQ(*ptr_some.unwrap(), 9);
+    Option<int*> ptr_null = std::optional<int*>(nullptr);
+    EXPECT_TRUE(ptr_null.is_none());
+
+    // Nested Option<std::optional<int>> preserves wrapping rather than unwrapping
+    Option<std::optional<int>> nested{ std::optional<int>(std::nullopt) };
+    EXPECT_TRUE(nested.is_some());
+    EXPECT_FALSE(nested.unwrap().has_value());
+
+    // Reference options reject std::optional conversion and to_std()
+    auto can_to_std = []<typename Opt>(Opt&& o)
+    {
+        return requires { std::forward<Opt>(o).to_std(); };
+    };
+    int dummy_ref_slot = 0;
+    Option<int&> ref_opt(dummy_ref_slot);
+    static_assert(!std::is_constructible_v<Option<int&>, std::optional<int>&>);
+    static_assert(!std::is_constructible_v<Option<const int&>, const std::optional<int>&>);
+    static_assert(!can_to_std(ref_opt));
+
+    // to_std() borrows on lvalue / const rvalue, consumes on non-const rvalue
+    Option<std::string> opt = std::string("crab");
+    std::optional<std::string> std_lval = opt.to_std();
+    ASSERT_TRUE(std_lval.has_value());
+    EXPECT_EQ(*std_lval, "crab");
+    EXPECT_TRUE(opt.is_some());
+
+    const Option<std::string> locked = std::string("stay");
+    std::optional<std::string> std_const_rval = static_cast<const Option<std::string>&&>(locked).to_std();
+    ASSERT_TRUE(std_const_rval.has_value());
+    EXPECT_EQ(*std_const_rval, "stay");
+    EXPECT_TRUE(locked.is_some());
+
+    std::optional<std::string> std_moved = std::move(opt).to_std();
+    ASSERT_TRUE(std_moved.has_value());
+    EXPECT_EQ(*std_moved, "crab");
+    EXPECT_TRUE(opt.is_none());
+    EXPECT_FALSE(opt.to_std().has_value());
+
+    // Move-only to_std() works on rvalue and is disabled on lvalue
+    Option<std::unique_ptr<int>> unique_opt(std::make_unique<int>(99));
+    static_assert(!can_to_std(unique_opt));
+    std::optional<std::unique_ptr<int>> unique_std = std::move(unique_opt).to_std();
+    ASSERT_TRUE(unique_std.has_value());
+    EXPECT_EQ(**unique_std, 99);
+    EXPECT_TRUE(unique_opt.is_none());
+
+    // Pointer option to_std()
+    Option<int*> raw_ptr(&slot);
+    std::optional<int*> std_ptr = std::move(raw_ptr).to_std();
+    ASSERT_TRUE(std_ptr.has_value());
+    EXPECT_EQ(*std_ptr, &slot);
+    EXPECT_TRUE(raw_ptr.is_none());
+}
+
 #include "option_matrix.inl"

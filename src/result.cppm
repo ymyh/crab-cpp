@@ -463,6 +463,7 @@ public:
     template<typename U>
         requires (
             !std::same_as<std::remove_cvref_t<U>, Result> &&
+            !requires { typename std::remove_cvref_t<U>::crab_cpp_try_carrier_tag; } &&
             internal::result_convertible_from<T, E, U&&>
         )
     constexpr Result(U&& value)
@@ -487,6 +488,160 @@ public:
         )
     explicit constexpr Result(std::in_place_index_t<I>, Args&&... args)
         : m_data(std::in_place_index<I>, std::forward<Args>(args)...)
+    {
+    }
+
+    /**
+     * @brief Constructs a Result from a const std::expected<U, G>&
+     * @tparam U The expected value type
+     * @tparam G The expected error type
+     * @param exp The std::expected to copy from
+     * @note Not provided when T or E is an lvalue reference.
+     */
+    template<typename U, typename G>
+        requires (
+            !t_is_ref &&
+            !e_is_ref &&
+            !std::is_void_v<U> &&
+            !internal::converts_from_any_cvref<T, std::expected<U, G>> &&
+            !internal::converts_from_any_cvref<E, std::expected<U, G>> &&
+            std::is_constructible_v<T, const U&> &&
+            std::is_constructible_v<E, const G&>
+        )
+    explicit(!std::is_convertible_v<const U&, T> || !std::is_convertible_v<const G&, E>)
+    constexpr Result(const std::expected<U, G>& exp)
+        noexcept(
+            std::is_nothrow_constructible_v<T, const U&> &&
+            std::is_nothrow_constructible_v<E, const G&> &&
+            std::is_nothrow_move_constructible_v<storage>
+        )
+        : m_data(
+            exp.has_value()
+                ? storage(std::in_place_index<0>, *exp)
+                : storage(std::in_place_index<1>, exp.error())
+        )
+    {
+    }
+
+    /**
+     * @brief Constructs a Result from a std::expected<U, G>&&
+     * @tparam U The expected value type
+     * @tparam G The expected error type
+     * @param exp The std::expected to move from
+     * @note Not provided when T or E is an lvalue reference.
+     */
+    template<typename U, typename G>
+        requires (
+            !t_is_ref &&
+            !e_is_ref &&
+            !std::is_void_v<U> &&
+            !internal::converts_from_any_cvref<T, std::expected<U, G>> &&
+            !internal::converts_from_any_cvref<E, std::expected<U, G>> &&
+            std::is_constructible_v<T, U&&> &&
+            std::is_constructible_v<E, G&&>
+        )
+    explicit(!std::is_convertible_v<U&&, T> || !std::is_convertible_v<G&&, E>)
+    constexpr Result(std::expected<U, G>&& exp)
+        noexcept(
+            std::is_nothrow_constructible_v<T, U&&> &&
+            std::is_nothrow_constructible_v<E, G&&> &&
+            std::is_nothrow_move_constructible_v<storage>
+        )
+        : m_data(
+            exp.has_value()
+                ? storage(std::in_place_index<0>, *std::move(exp))
+                : storage(std::in_place_index<1>, std::move(exp).error())
+        )
+    {
+    }
+
+    /**
+     * @brief Constructs a Result<None, E> from a const std::expected<void, G>&
+     * @tparam G The expected error type
+     * @param exp The std::expected<void, G> to copy from
+     */
+    template<typename G>
+        requires (
+            std::same_as<std::remove_cv_t<T>, None> &&
+            !e_is_ref &&
+            !internal::converts_from_any_cvref<E, std::expected<void, G>> &&
+            std::is_constructible_v<E, const G&>
+        )
+    explicit(!std::is_convertible_v<const G&, E>)
+    constexpr Result(const std::expected<void, G>& exp)
+        noexcept(
+            std::is_nothrow_constructible_v<E, const G&> &&
+            std::is_nothrow_move_constructible_v<storage>
+        )
+        : m_data(
+            exp.has_value()
+                ? storage(std::in_place_index<0>, None{})
+                : storage(std::in_place_index<1>, exp.error())
+        )
+    {
+    }
+
+    /**
+     * @brief Constructs a Result<None, E> from a std::expected<void, G>&&
+     * @tparam G The expected error type
+     * @param exp The std::expected<void, G> to move from
+     */
+    template<typename G>
+        requires (
+            std::same_as<std::remove_cv_t<T>, None> &&
+            !e_is_ref &&
+            !internal::converts_from_any_cvref<E, std::expected<void, G>> &&
+            std::is_constructible_v<E, G&&>
+        )
+    explicit(!std::is_convertible_v<G&&, E>)
+    constexpr Result(std::expected<void, G>&& exp)
+        noexcept(
+            std::is_nothrow_constructible_v<E, G&&> &&
+            std::is_nothrow_move_constructible_v<storage>
+        )
+        : m_data(
+            exp.has_value()
+                ? storage(std::in_place_index<0>, None{})
+                : storage(std::in_place_index<1>, std::move(exp).error())
+        )
+    {
+    }
+
+    /**
+     * @brief Constructs an Err Result from a const std::unexpected<G>&
+     * @tparam G The unexpected error type
+     * @param err The std::unexpected to copy from
+     */
+    template<typename G>
+        requires (
+            !e_is_ref &&
+            !internal::converts_from_any_cvref<T, std::unexpected<G>> &&
+            !internal::converts_from_any_cvref<E, std::unexpected<G>> &&
+            std::is_constructible_v<E, const G&>
+        )
+    explicit(!std::is_convertible_v<const G&, E>)
+    constexpr Result(const std::unexpected<G>& err)
+        noexcept(std::is_nothrow_constructible_v<E, const G&>)
+        : m_data(std::in_place_index<1>, err.error())
+    {
+    }
+
+    /**
+     * @brief Constructs an Err Result from a std::unexpected<G>&&
+     * @tparam G The unexpected error type
+     * @param err The std::unexpected to move from
+     */
+    template<typename G>
+        requires (
+            !e_is_ref &&
+            !internal::converts_from_any_cvref<T, std::unexpected<G>> &&
+            !internal::converts_from_any_cvref<E, std::unexpected<G>> &&
+            std::is_constructible_v<E, G&&>
+        )
+    explicit(!std::is_convertible_v<G&&, E>)
+    constexpr Result(std::unexpected<G>&& err)
+        noexcept(std::is_nothrow_constructible_v<E, G&&>)
+        : m_data(std::in_place_index<1>, std::move(err).error())
     {
     }
 
@@ -576,6 +731,42 @@ public:
         }
 
         return Result<T&, E&>(std::in_place_index<1>, this->m_data.get_err());
+    }
+
+    /**
+     * @brief Converts this Result<T, E> into std::expected<T, E>
+     * @tparam Self The type of self
+     * @return std::expected<T, E> holding the value if Ok, or std::unexpected(err) if Err
+     * @note Lvalue self copies. Non-const rvalue self moves the active alternative out, leaving
+     *       a moved-from value in place. Not provided when T or E is a reference, or when E
+     *       cannot be an error type of std::expected.
+     */
+    template<typename Self>
+        requires (
+            !t_is_ref &&
+            !e_is_ref &&
+            !std::is_const_v<E> &&
+            !std::is_volatile_v<E> &&
+            !std::is_array_v<T> &&
+            !std::is_array_v<E> &&
+            (
+                (!std::is_lvalue_reference_v<Self> && !std::is_const_v<std::remove_reference_t<Self>>) ||
+                (std::copy_constructible<T> && std::copy_constructible<E>)
+            )
+        )
+    [[nodiscard]] constexpr auto to_std(this Self&& self)
+        noexcept(
+            (!std::is_lvalue_reference_v<Self> && !std::is_const_v<std::remove_reference_t<Self>>)
+                ? (std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_constructible_v<E>)
+                : (std::is_nothrow_copy_constructible_v<T> && std::is_nothrow_copy_constructible_v<E>)
+        ) -> std::expected<T, E>
+    {
+        if (self.is_ok())
+        {
+            return std::expected<T, E>(std::in_place, std::forward<Self>(self).forward_ok());
+        }
+
+        return std::expected<T, E>(std::unexpect, std::forward<Self>(self).forward_err());
     }
 
     /**
@@ -935,6 +1126,72 @@ public:
     }
 
     /**
+     * @brief Maps a Result<T, E> to U by applying fallback function d to a contained Err value,
+     *        or function f to a contained Ok value
+     * @tparam Self The type of self
+     * @tparam D The type of the fallback function to call if Err
+     * @tparam F The type of the function to call if Ok
+     * @param d The function to call with the error if Err
+     * @param f The function to call with the value if Ok
+     * @return The result of f if Ok, otherwise the result of d
+     * @note Lvalue self passes T& / E&. Rvalue self passes T&& / E&&.
+     *       Reference alternatives always pass an lvalue to the referent.
+     */
+    template<
+        typename Self,
+        typename D,
+        typename F,
+        typename OkArg = internal::result_forward_t<Self, T>,
+        typename ErrArg = internal::result_forward_t<Self, E>,
+        typename U = std::invoke_result_t<F, OkArg>
+    >
+        requires (
+            std::invocable<F, OkArg> &&
+            std::invocable<D, ErrArg> &&
+            std::same_as<std::invoke_result_t<D, ErrArg>, U>
+        )
+    [[nodiscard]] constexpr auto map_or_else(this Self&& self, D&& d, F&& f) -> U
+    {
+        if (self.is_ok())
+        {
+            return std::invoke(std::forward<F>(f), std::forward<Self>(self).forward_ok());
+        }
+
+        return std::invoke(std::forward<D>(d), std::forward<Self>(self).forward_err());
+    }
+
+    /**
+     * @brief Maps a Result<T, E> to U by applying a function to a contained Ok value,
+     *        or returns the default value of U if Err
+     * @tparam Self The type of self
+     * @tparam F The type of the function to call if Ok
+     * @tparam U The return type of the function, which must be default-constructible
+     * @param f The function to call with the value if Ok
+     * @return The result of f if Ok, otherwise U{}
+     * @note Lvalue self passes T&. Rvalue self passes T&&.
+     *       Reference alternatives always pass an lvalue to the referent.
+     */
+    template<
+        typename Self,
+        typename F,
+        typename Arg = internal::result_forward_t<Self, T>,
+        typename U = std::invoke_result_t<F, Arg>
+    >
+        requires (
+            std::is_default_constructible_v<U> &&
+            std::invocable<F, Arg>
+        )
+    [[nodiscard]] constexpr auto map_or_default(this Self&& self, F&& f) -> U
+    {
+        if (self.is_ok())
+        {
+            return std::invoke(std::forward<F>(f), std::forward<Self>(self).forward_ok());
+        }
+
+        return U{};
+    }
+
+    /**
      * @brief Returns true if the result is Ok and the predicate returns true for the contained value
      * @tparam Self The type of self
      * @tparam F The type of the predicate function
@@ -1110,6 +1367,42 @@ public:
         else
         {
             return T(std::move(*std::get_if<0>(&self.m_data.m_repr.data)));
+        }
+    }
+
+    /**
+     * @brief Returns the contained Err value by value without checking
+     * @tparam Self The type of self
+     * @return The contained error. Lvalue self copies. Rvalue self moves out and is left moved-from.
+     *         A reference alternative returns that reference.
+     * @warning Undefined behavior if this result is Ok
+     */
+    template<typename Self>
+    [[nodiscard]] constexpr auto unwrap_err_unchecked(this Self&& self)
+        noexcept(std::is_nothrow_copy_constructible_v<E> && std::is_nothrow_move_constructible_v<E>) -> E
+    {
+        if constexpr (e_is_ref)
+        {
+            return self.m_data.get_err();
+        }
+        else if constexpr (std::is_lvalue_reference_v<Self> || std::is_const_v<std::remove_reference_t<Self>>)
+        {
+            if constexpr (storage::any_ref)
+            {
+                return E(*self.m_data.m_repr.err_slot);
+            }
+            else
+            {
+                return E(*std::get_if<1>(&self.m_data.m_repr.data));
+            }
+        }
+        else if constexpr (storage::any_ref)
+        {
+            return E(std::move(*self.m_data.m_repr.err_slot));
+        }
+        else
+        {
+            return E(std::move(*std::get_if<1>(&self.m_data.m_repr.data)));
         }
     }
 

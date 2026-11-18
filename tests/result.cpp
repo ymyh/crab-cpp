@@ -302,4 +302,232 @@ TEST(ResultTest, UnwrapUnchecked)
     EXPECT_EQ(locked.unwrap(), "stay");
 }
 
+TEST(ResultTest, UnwrapErrUnchecked)
+{
+    auto err = Result<int, std::string>(std::string("boom"));
+    EXPECT_EQ(err.unwrap_err_unchecked(), "boom");
+    EXPECT_EQ(err.unwrap_err(), "boom");
+
+    auto consumed = std::move(err).unwrap_err_unchecked();
+    EXPECT_EQ(consumed, "boom");
+    EXPECT_TRUE(err.is_err());
+    EXPECT_TRUE(err.unwrap_err().empty());
+
+    std::string message = "err";
+    Result<int, std::string&> ref_err(std::in_place_index<1>, message);
+    EXPECT_EQ(ref_err.unwrap_err_unchecked(), "err");
+    ref_err.unwrap_err_unchecked() += "!";
+    EXPECT_EQ(message, "err!");
+
+    int ok_slot = 7;
+    Result<int&, std::string> mixed(std::in_place_index<1>, std::string("mixed"));
+    EXPECT_EQ(mixed.unwrap_err_unchecked(), "mixed");
+    auto moved_mixed = std::move(mixed).unwrap_err_unchecked();
+    EXPECT_EQ(moved_mixed, "mixed");
+    EXPECT_TRUE(mixed.unwrap_err().empty());
+    (void)ok_slot;
+
+    const auto locked = Result<int, std::string>(std::string("stay"));
+    auto from_const_rvalue = static_cast<const Result<int, std::string>&&>(locked).unwrap_err_unchecked();
+    EXPECT_EQ(from_const_rvalue, "stay");
+    EXPECT_EQ(locked.unwrap_err(), "stay");
+}
+
+TEST(ResultTest, MapOrElse)
+{
+    auto ok = Result<std::string, std::string>(std::in_place_index<0>, std::string("hello"));
+    int fallback_calls = 0;
+    auto ok_len = ok.map_or_else(
+        [&](const std::string& e)
+        {
+            ++fallback_calls;
+            return e.size() + 100;
+        },
+        [](const std::string& s) { return s.size(); }
+    );
+    EXPECT_EQ(ok_len, 5);
+    EXPECT_EQ(fallback_calls, 0);
+    EXPECT_EQ(ok.unwrap(), "hello");
+
+    auto err = Result<std::string, std::string>(std::in_place_index<1>, std::string("fail"));
+    int ok_calls = 0;
+    auto err_len = err.map_or_else(
+        [](const std::string& e) { return e.size() + 100; },
+        [&](const std::string& s)
+        {
+            ++ok_calls;
+            return s.size();
+        }
+    );
+    EXPECT_EQ(err_len, 104);
+    EXPECT_EQ(ok_calls, 0);
+    EXPECT_EQ(err.unwrap_err(), "fail");
+
+    auto moved_ok = std::move(ok).map_or_else(
+        [](std::string) { return std::string("fallback"); },
+        [](std::string s) { return s + "!"; }
+    );
+    EXPECT_EQ(moved_ok, "hello!");
+    EXPECT_TRUE(ok.unwrap().empty());
+
+    auto moved_err = std::move(err).map_or_else(
+        [](std::string e) { return e + "!"; },
+        [](std::string) { return std::string("ok"); }
+    );
+    EXPECT_EQ(moved_err, "fail!");
+    EXPECT_TRUE(err.unwrap_err().empty());
+
+    int ok_val = 10;
+    int err_val = 20;
+    Result<int&, int&> ref_res(std::in_place_index<0>, ok_val);
+    EXPECT_EQ(ref_res.map_or_else([](int& e) { return e * 2; }, [](int& v) { return v + 1; }), 11);
+    Result<int&, int&> ref_err_res(std::in_place_index<1>, err_val);
+    EXPECT_EQ(ref_err_res.map_or_else([](int& e) { return e * 2; }, [](int& v) { return v + 1; }), 40);
+}
+
+TEST(ResultTest, MapOrDefault)
+{
+    auto ok = Result<std::string, int>(std::string("abc"));
+    EXPECT_EQ(ok.map_or_default([](const std::string& s) { return s.size(); }), 3);
+    EXPECT_EQ(ok.unwrap(), "abc");
+
+    auto err = Result<std::string, int>(404);
+    int calls = 0;
+    auto fallback = err.map_or_default([&](const std::string& s)
+    {
+        ++calls;
+        return s.size();
+    });
+    EXPECT_EQ(fallback, 0);
+    EXPECT_EQ(calls, 0);
+
+    auto moved = std::move(ok).map_or_default([](std::string s) { return s + "!"; });
+    EXPECT_EQ(moved, "abc!");
+    EXPECT_TRUE(ok.unwrap().empty());
+
+    int slot = 9;
+    Result<int&, int> ref_ok(std::in_place_index<0>, slot);
+    EXPECT_EQ(ref_ok.map_or_default([](int& v) { return v * 3; }), 27);
+    Result<int&, int> ref_err(std::in_place_index<1>, 1);
+    EXPECT_EQ(ref_err.map_or_default([](int& v) { return v * 3; }), 0);
+
+    struct NoDefault
+    {
+        NoDefault() = delete;
+        explicit NoDefault(int) {}
+    };
+    auto can_map_or_default = []<typename Res>(Res& res)
+    {
+        return requires { res.map_or_default([](int v) { return NoDefault(v); }); };
+    };
+    Result<int, int> dummy(std::in_place_index<0>, 1);
+    static_assert(!can_map_or_default(dummy));
+}
+
+TEST(ResultTest, StdExpectedConversion)
+{
+    // From const std::expected&
+    const std::expected<std::string, int> ok_src = "hello";
+    Result<std::string, int> from_ok = ok_src;
+    EXPECT_TRUE(from_ok.is_ok());
+    EXPECT_EQ(from_ok.unwrap(), "hello");
+
+    const std::expected<std::string, int> err_src = std::unexpected(404);
+    Result<std::string, int> from_err = err_src;
+    EXPECT_TRUE(from_err.is_err());
+    EXPECT_EQ(from_err.unwrap_err(), 404);
+
+    // From std::expected&& (move-only Ok / Err)
+    std::expected<std::unique_ptr<int>, std::string> moved_ok_src = std::make_unique<int>(7);
+    Result<std::unique_ptr<int>, std::string> moved_ok = std::move(moved_ok_src);
+    ASSERT_TRUE(moved_ok.is_ok());
+    EXPECT_EQ(*std::move(moved_ok).unwrap(), 7);
+
+    std::expected<int, std::unique_ptr<int>> moved_err_src = std::unexpected(std::make_unique<int>(8));
+    Result<int, std::unique_ptr<int>> moved_err = std::move(moved_err_src);
+    ASSERT_TRUE(moved_err.is_err());
+    EXPECT_EQ(*std::move(moved_err).unwrap_err(), 8);
+
+    // Same Ok/Err types (T == E) via std::expected and std::unexpected
+    Result<int, int> same_ok = std::expected<int, int>(std::in_place, 10);
+    EXPECT_TRUE(same_ok.is_ok());
+    EXPECT_EQ(same_ok.unwrap(), 10);
+
+    Result<int, int> same_err = std::expected<int, int>(std::unexpect, 20);
+    EXPECT_TRUE(same_err.is_err());
+    EXPECT_EQ(same_err.unwrap_err(), 20);
+
+    Result<int, int> from_unexp = std::unexpected(30);
+    EXPECT_TRUE(from_unexp.is_err());
+    EXPECT_EQ(from_unexp.unwrap_err(), 30);
+
+    // std::expected<void, G> -> Result<None, E>
+    std::expected<void, std::string> void_ok;
+    Result<None, std::string> res_void_ok = void_ok;
+    EXPECT_TRUE(res_void_ok.is_ok());
+
+    std::expected<void, std::string> void_err = std::unexpected(std::string("bad"));
+    Result<None, std::string> res_void_err = std::move(void_err);
+    EXPECT_TRUE(res_void_err.is_err());
+    EXPECT_EQ(res_void_err.unwrap_err(), "bad");
+
+    // Explicitness check
+    struct ExplicitBox
+    {
+        int v = 0;
+        explicit ExplicitBox(int v) : v(v) {}
+    };
+    static_assert(std::is_constructible_v<Result<ExplicitBox, int>, std::expected<int, int>>);
+    static_assert(!std::is_convertible_v<std::expected<int, int>, Result<ExplicitBox, int>>);
+
+    // Nested Result<std::expected<int, int>, int> wraps rather than unwrapping
+    Result<std::expected<int, int>, int> nested(std::expected<int, int>(std::unexpect, 5));
+    EXPECT_TRUE(nested.is_ok());
+    EXPECT_FALSE(nested.unwrap().has_value());
+    EXPECT_EQ(nested.unwrap().error(), 5);
+
+    // Reference alternatives reject std::expected conversion and to_std()
+    auto can_to_std = []<typename Res>(Res&& r)
+    {
+        return requires { std::forward<Res>(r).to_std(); };
+    };
+    int dummy_ref_slot = 0;
+    Result<int&, int> ref_ok_res(std::in_place_index<0>, dummy_ref_slot);
+    Result<int, int&> ref_err_res(std::in_place_index<1>, dummy_ref_slot);
+    static_assert(!std::is_constructible_v<Result<int&, int>, std::expected<int, int>>);
+    static_assert(!can_to_std(ref_ok_res));
+    static_assert(!can_to_std(ref_err_res));
+
+    // to_std() borrows on lvalue / const rvalue, moves on non-const rvalue
+    Result<std::string, int> ok_res = std::string("crab");
+    std::expected<std::string, int> exp_lval = ok_res.to_std();
+    ASSERT_TRUE(exp_lval.has_value());
+    EXPECT_EQ(*exp_lval, "crab");
+    EXPECT_EQ(ok_res.unwrap(), "crab");
+
+    const Result<std::string, int> locked_res = std::string("stay");
+    std::expected<std::string, int> exp_const_rval = static_cast<const Result<std::string, int>&&>(locked_res).to_std();
+    ASSERT_TRUE(exp_const_rval.has_value());
+    EXPECT_EQ(*exp_const_rval, "stay");
+    EXPECT_EQ(locked_res.unwrap(), "stay");
+
+    std::expected<std::string, int> exp_moved = std::move(ok_res).to_std();
+    ASSERT_TRUE(exp_moved.has_value());
+    EXPECT_EQ(*exp_moved, "crab");
+    EXPECT_TRUE(ok_res.unwrap().empty());
+
+    Result<int, std::string> err_res = std::string("oops");
+    std::expected<int, std::string> exp_err_moved = std::move(err_res).to_std();
+    ASSERT_FALSE(exp_err_moved.has_value());
+    EXPECT_EQ(exp_err_moved.error(), "oops");
+    EXPECT_TRUE(err_res.unwrap_err().empty());
+
+    // Move-only to_std() works on rvalue and is disabled on lvalue
+    Result<std::unique_ptr<int>, int> unique_res(std::make_unique<int>(55));
+    static_assert(!can_to_std(unique_res));
+    std::expected<std::unique_ptr<int>, int> unique_exp = std::move(unique_res).to_std();
+    ASSERT_TRUE(unique_exp.has_value());
+    EXPECT_EQ(**unique_exp, 55);
+}
+
 #include "result_matrix.inl"

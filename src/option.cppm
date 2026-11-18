@@ -258,6 +258,20 @@ namespace internal
                 { std::hash<T>{}(value) } -> std::convertible_to<std::size_t>;
             }
         );
+
+    /**
+     * @brief True when T can be constructed or converted from any cv-ref qualified Wrapper
+     */
+    template<typename T, typename Wrapper>
+    concept converts_from_any_cvref =
+        std::is_constructible_v<T, Wrapper&> ||
+        std::is_constructible_v<T, const Wrapper&> ||
+        std::is_constructible_v<T, Wrapper&&> ||
+        std::is_constructible_v<T, const Wrapper&&> ||
+        std::is_convertible_v<Wrapper&, T> ||
+        std::is_convertible_v<const Wrapper&, T> ||
+        std::is_convertible_v<Wrapper&&, T> ||
+        std::is_convertible_v<const Wrapper&&, T>;
 }
 
 /**
@@ -391,6 +405,7 @@ public:
         requires (
             !std::same_as<std::remove_cvref_t<U>, Option> &&
             !std::same_as<std::remove_cvref_t<U>, None> &&
+            !requires { typename std::remove_cvref_t<U>::crab_cpp_try_carrier_tag; } &&
             (
                 (stores_reference && std::is_lvalue_reference_v<U> && std::is_convertible_v<U&&, T>) ||
                 (!stores_reference && std::is_constructible_v<T, U&&>)
@@ -400,6 +415,49 @@ public:
         noexcept(stores_indirect || std::is_nothrow_constructible_v<T, U&&>)
     {
         this->m_data.emplace(std::forward<U>(value));
+    }
+
+    /**
+     * @brief Constructs an Option from a const std::optional<U>&
+     * @tparam U The value type of the std::optional
+     * @param opt The std::optional to copy from
+     * @note Not provided for reference options because std::optional has no reference storage and
+     *       borrowing a temporary's element would dangle.
+     */
+    template<typename U>
+        requires (
+            !stores_reference &&
+            !internal::converts_from_any_cvref<T, std::optional<U>> &&
+            std::is_constructible_v<T, const U&>
+        )
+    explicit(!std::is_convertible_v<const U&, T>) constexpr Option(const std::optional<U>& opt)
+        noexcept(stores_indirect || std::is_nothrow_constructible_v<T, const U&>)
+    {
+        if (opt.has_value())
+        {
+            this->m_data.emplace(*opt);
+        }
+    }
+
+    /**
+     * @brief Constructs an Option from a std::optional<U>&&
+     * @tparam U The value type of the std::optional
+     * @param opt The std::optional to move from
+     * @note Not provided for reference options.
+     */
+    template<typename U>
+        requires (
+            !stores_reference &&
+            !internal::converts_from_any_cvref<T, std::optional<U>> &&
+            std::is_constructible_v<T, U&&>
+        )
+    explicit(!std::is_convertible_v<U&&, T>) constexpr Option(std::optional<U>&& opt)
+        noexcept(stores_indirect || std::is_nothrow_constructible_v<T, U&&>)
+    {
+        if (opt.has_value())
+        {
+            this->m_data.emplace(std::move(*opt));
+        }
     }
 
     /**
@@ -1261,6 +1319,33 @@ public:
         }
 
         return None{};
+    }
+
+    /**
+     * @brief Converts this Option<T> into std::optional<T>
+     * @tparam Self The type of self
+     * @return std::optional<T> holding the value if Some, otherwise std::nullopt
+     * @note Lvalue self copies. Non-const rvalue self moves out and becomes None.
+     *       Not provided for reference options because C++23 std::optional does not support references.
+     */
+    template<typename Self>
+        requires (
+            !stores_reference &&
+            (internal::resets_on_rvalue_v<Self> || std::copy_constructible<T>)
+        )
+    [[nodiscard]] constexpr auto to_std(this Self&& self)
+        noexcept(
+            internal::resets_on_rvalue_v<Self>
+                ? (stores_pointer || std::is_nothrow_move_constructible_v<T>)
+                : (stores_pointer || std::is_nothrow_copy_constructible_v<T>)
+        ) -> std::optional<T>
+    {
+        if (self.is_some())
+        {
+            return std::optional<T>(std::forward<Self>(self).take_out());
+        }
+
+        return std::nullopt;
     }
 
     /**
