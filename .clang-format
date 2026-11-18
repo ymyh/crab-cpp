@@ -1,0 +1,80 @@
+---
+Language: Cpp
+Standard: c++23
+
+# Indentation and layout (4 spaces, no tabs)
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ContinuationIndentWidth: 4
+AccessModifierOffset: -4
+NamespaceIndentation: Inner
+ColumnLimit: 120
+MaxEmptyLinesToKeep: 1
+KeepEmptyLines:
+  AtEndOfFile: false
+  AtStartOfBlock: false
+  AtStartOfFile: false
+
+# Braces (Allman / Microsoft style)
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterCaseLabel: false
+  AfterClass: true
+  AfterControlStatement: Always
+  AfterEnum: true
+  AfterFunction: true
+  AfterNamespace: true
+  AfterStruct: true
+  AfterUnion: true
+  AfterExternBlock: true
+  BeforeCatch: true
+  BeforeElse: true
+  BeforeLambdaBody: true
+  BeforeWhile: false
+  IndentBraces: false
+  SplitEmptyFunction: true
+  SplitEmptyRecord: true
+  SplitEmptyNamespace: true
+
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Empty
+AllowShortEnumsOnASingleLine: false
+AllowShortLambdasOnASingleLine: All
+InsertBraces: true
+
+# Pointers and references attached to type
+PointerAlignment: Left
+ReferenceAlignment: Pointer
+
+# Whitespace
+Cpp11BracedListStyle: false
+SpaceBeforeParens: Custom
+SpaceBeforeParensOptions:
+  AfterControlStatements: true
+  AfterRequiresInClause: true
+  AfterRequiresInExpression: true
+SpaceAfterTemplateKeyword: false
+SpacesInAngles: Never
+SpaceBeforeCpp11BracedList: false
+SpaceAfterCStyleCast: false
+SpaceInEmptyParentheses: false
+
+# Templates and C++20/23 concepts
+AlwaysBreakTemplateDeclarations: MultiLine
+RequiresClausePosition: OwnLine
+IndentRequiresClause: true
+BreakBeforeConceptDeclarations: Always
+
+# Wrapping and alignment
+AlignAfterOpenBracket: DontAlign
+AlignOperands: Align
+BinPackArguments: true
+BinPackParameters: true
+BreakConstructorInitializers: BeforeColon
+ConstructorInitializerIndentWidth: 4
+FixNamespaceComments: false
+SortIncludes: Never
+...
