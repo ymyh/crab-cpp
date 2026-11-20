@@ -180,6 +180,7 @@ One method stands for each family. The others differ only in which side they tou
 - `ok_or`, and `ok_or_else`. `Some` becomes Ok. `None` becomes Err.
 - `Option(const std::optional<U>&)` / `Option(std::optional<U>&&)` and `to_std()` convert between `Option` and `std::optional` (value and pointer options only; reference options are excluded because C++23 `std::optional` has no reference storage).
 - `==` and `<=>`. `None` is less than `Some`. `std::hash<Option<T>>` mixes a Some/None tag with the value hash, so `None` and `Some(0)` do not collide. References hash the referent. Pointers hash the address.
+- `std::formatter<Option<T>, CharT>` formats `None` as `None` and `Some(v)` as `Some(...)` (forwarding format specifiers to `T`) when `T` is formattable.
 
 An operand that is copied or moved is taken before either side is reset. Writing `std::move(opt).and_(opt)` therefore still observes the value.
 
@@ -245,6 +246,7 @@ int main()
 - `visit` calls the visitor with the Ok value or the Err value, and does not empty the result.
 - `Result(const std::expected<U, G>&)` / `Result(std::expected<U, G>&&)` (including `std::expected<void, G>` for `Result<None, E>`), `Result(std::unexpected<G>)`, and `to_std()` convert between `Result` and `std::expected` (non-reference alternatives only).
 - `==` and `<=>`. Ok is less than Err. `std::hash<Result<T, E>>` mixes an Ok/Err tag with the active value. References hash the referent.
+- `std::formatter<Result<T, E>, CharT>` formats `Ok(v)` as `Ok(...)` and `Err(e)` as `Err(...)` when both `T` and `E` are formattable.
 
 #### match
 The `match` macro lives in a header, because a macro cannot cross a module boundary.

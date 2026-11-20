@@ -1550,4 +1550,100 @@ namespace std
             return hash_value(res);
         }
     };
+
+    /**
+     * @brief Formatting support for Result<T, E>
+     * @tparam T The Ok value type
+     * @tparam E The Err value type
+     * @tparam CharT The character type (char or wchar_t)
+     * @details Formats Ok(v) as "Ok(v)" and Err(e) as "Err(e)". Accepts an empty
+     *          format specification, since T and E may have different types.
+     */
+    template<typename T, typename E, typename CharT>
+        requires (
+            (std::same_as<CharT, char> || std::same_as<CharT, wchar_t>) &&
+            std::formattable<std::remove_cvref_t<T>, CharT> &&
+            std::formattable<std::remove_cvref_t<E>, CharT>
+        )
+    struct formatter<crab_cpp::Result<T, E>, CharT>
+    {
+        using ok_t = std::remove_cvref_t<T>;
+        using err_t = std::remove_cvref_t<E>;
+
+        std::formatter<ok_t, CharT> m_ok_formatter{};
+        std::formatter<err_t, CharT> m_err_formatter{};
+
+        constexpr auto parse(std::basic_format_parse_context<CharT>& ctx)
+        {
+            auto it = ctx.begin();
+
+            if (it != ctx.end() && *it != CharT('}'))
+            {
+                throw std::format_error("Result formatter does not support format specifiers");
+            }
+
+            std::basic_format_parse_context<CharT> empty_ctx{ std::basic_string_view<CharT>{} };
+            this->m_ok_formatter.parse(empty_ctx);
+            this->m_err_formatter.parse(empty_ctx);
+
+            return it;
+        }
+
+        template<typename FormatContext>
+        auto format(const crab_cpp::Result<T, E>& res, FormatContext& ctx) const
+        {
+            const auto borrowed = res.as_ref();
+
+            if (borrowed.is_ok())
+            {
+                auto out = [&]
+                {
+                    if constexpr (std::same_as<CharT, char>)
+                    {
+                        return std::format_to(ctx.out(), "Ok(");
+                    }
+                    else
+                    {
+                        return std::format_to(ctx.out(), L"Ok(");
+                    }
+                }();
+                ctx.advance_to(out);
+                out = this->m_ok_formatter.format(borrowed.unwrap(), ctx);
+                ctx.advance_to(out);
+
+                if constexpr (std::same_as<CharT, char>)
+                {
+                    return std::format_to(ctx.out(), ")");
+                }
+                else
+                {
+                    return std::format_to(ctx.out(), L")");
+                }
+            }
+
+            auto out = [&]
+            {
+                if constexpr (std::same_as<CharT, char>)
+                {
+                    return std::format_to(ctx.out(), "Err(");
+                }
+                else
+                {
+                    return std::format_to(ctx.out(), L"Err(");
+                }
+            }();
+            ctx.advance_to(out);
+            out = this->m_err_formatter.format(borrowed.unwrap_err(), ctx);
+            ctx.advance_to(out);
+
+            if constexpr (std::same_as<CharT, char>)
+            {
+                return std::format_to(ctx.out(), ")");
+            }
+            else
+            {
+                return std::format_to(ctx.out(), L")");
+            }
+        }
+    };
 }

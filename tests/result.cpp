@@ -530,4 +530,49 @@ TEST(ResultTest, StdExpectedConversion)
     EXPECT_EQ(**unique_exp, 55);
 }
 
+TEST(ResultTest, StdFormatter)
+{
+    Result<int, std::string> ok(42);
+    Result<int, std::string> err(std::string("boom"));
+    EXPECT_EQ(std::format("{}", ok), "Ok(42)");
+    EXPECT_EQ(std::format("{}", err), "Err(boom)");
+
+    // Same Ok and Err type
+    Result<int, int> same_ok(std::in_place_index<0>, 1);
+    Result<int, int> same_err(std::in_place_index<1>, 2);
+    EXPECT_EQ(std::format("{}", same_ok), "Ok(1)");
+    EXPECT_EQ(std::format("{}", same_err), "Err(2)");
+
+    // Reference alternatives
+    int ok_slot = 5;
+    std::string err_slot = "err";
+    Result<int&, std::string&> ref_ok(std::in_place_index<0>, ok_slot);
+    Result<int&, std::string&> ref_err(std::in_place_index<1>, err_slot);
+    EXPECT_EQ(std::format("{}", ref_ok), "Ok(5)");
+    EXPECT_EQ(std::format("{}", ref_err), "Err(err)");
+
+    // Wide-char formatter
+    EXPECT_EQ(std::format(L"{}", Result<int, int>(std::in_place_index<0>, 8)), L"Ok(8)");
+    EXPECT_EQ(std::format(L"{}", Result<int, int>(std::in_place_index<1>, 9)), L"Err(9)");
+
+    // Non-empty format specifier throws format_error at runtime via vformat
+    EXPECT_THROW(
+        (void)std::vformat("{:.2f}", std::make_format_args(ok)),
+        std::format_error
+    );
+
+    // Non-formattable alternative disables Result formatter
+    struct Unformattable {};
+    static_assert(std::formattable<Result<int, std::string>, char>);
+    static_assert(std::formattable<Result<int&, std::string&>, char>);
+    static_assert(!std::formattable<Result<Unformattable, int>, char>);
+    static_assert(!std::formattable<Result<int, Unformattable>, char>);
+
+#ifdef CRAB_CPP_ENABLE_STRING
+    using namespace literal;
+    EXPECT_EQ(std::format("{}", Result<String, str>(std::in_place_index<0>, "ok"_S)), "Ok(ok)");
+    EXPECT_EQ(std::format("{}", Result<String, str>(std::in_place_index<1>, "no"_s)), "Err(no)");
+#endif
+}
+
 #include "result_matrix.inl"

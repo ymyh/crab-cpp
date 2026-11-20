@@ -1708,4 +1708,77 @@ namespace std
             return hash_value(opt);
         }
     };
+
+    /**
+     * @brief Formatting support for Option<T>
+     * @tparam T The value type
+     * @tparam CharT The character type (char or wchar_t)
+     * @details Formats None as "None" and Some(v) as "Some(v)", forwarding format
+     *          specifiers to the underlying value formatter.
+     */
+    template<typename T, typename CharT>
+        requires (
+            (std::same_as<CharT, char> || std::same_as<CharT, wchar_t>) &&
+            std::formattable<std::remove_cvref_t<T>, CharT>
+        )
+    struct formatter<crab_cpp::Option<T>, CharT>
+    {
+        using value_t = std::remove_cvref_t<T>;
+
+        std::formatter<value_t, CharT> m_formatter{};
+
+        constexpr auto parse(std::basic_format_parse_context<CharT>& ctx)
+        {
+            return this->m_formatter.parse(ctx);
+        }
+
+        template<typename FormatContext>
+        auto format(const crab_cpp::Option<T>& opt, FormatContext& ctx) const
+        {
+            if (opt.is_none())
+            {
+                if constexpr (std::same_as<CharT, char>)
+                {
+                    return std::format_to(ctx.out(), "None");
+                }
+                else
+                {
+                    return std::format_to(ctx.out(), L"None");
+                }
+            }
+
+            auto out = [&]
+            {
+                if constexpr (std::same_as<CharT, char>)
+                {
+                    return std::format_to(ctx.out(), "Some(");
+                }
+                else
+                {
+                    return std::format_to(ctx.out(), L"Some(");
+                }
+            }();
+            ctx.advance_to(out);
+
+            if constexpr (std::is_reference_v<T> || std::is_pointer_v<T>)
+            {
+                out = this->m_formatter.format(opt.unwrap(), ctx);
+            }
+            else
+            {
+                out = this->m_formatter.format(opt.as_ref().unwrap(), ctx);
+            }
+
+            ctx.advance_to(out);
+
+            if constexpr (std::same_as<CharT, char>)
+            {
+                return std::format_to(ctx.out(), ")");
+            }
+            else
+            {
+                return std::format_to(ctx.out(), L")");
+            }
+        }
+    };
 }

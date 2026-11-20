@@ -1008,4 +1008,42 @@ TEST(OptionTest, StdOptionalConversion)
     EXPECT_TRUE(raw_ptr.is_none());
 }
 
+TEST(OptionTest, StdFormatter)
+{
+    EXPECT_EQ(std::format("{}", Option<int>(42)), "Some(42)");
+    EXPECT_EQ(std::format("{}", Option<int>(None{})), "None");
+
+    // Format specifier forwarding
+    EXPECT_EQ(std::format("{:#x}", Option<int>(255)), "Some(0xff)");
+    EXPECT_EQ(std::format("{:.2f}", Option<double>(3.14159)), "Some(3.14)");
+    EXPECT_EQ(std::format("{:.2f}", Option<double>(None{})), "None");
+
+    // Reference and C-string pointer options
+    int value = 7;
+    Option<int&> ref(value);
+    EXPECT_EQ(std::format("{}", ref), "Some(7)");
+    EXPECT_EQ(std::format("{}", Option<int&>(None{})), "None");
+
+    const char* text = "hi";
+    EXPECT_EQ(std::format("{}", Option<const char*>(text)), "Some(hi)");
+    EXPECT_EQ(std::format("{}", Option<const char*>(nullptr)), "None");
+
+    // Wide-char formatter
+    EXPECT_EQ(std::format(L"{}", Option<int>(9)), L"Some(9)");
+    EXPECT_EQ(std::format(L"{}", Option<int>(None{})), L"None");
+
+    // Non-formattable inner types remain non-formattable
+    struct Unformattable {};
+    static_assert(std::formattable<Option<int>, char>);
+    static_assert(std::formattable<Option<int&>, char>);
+    static_assert(!std::formattable<Option<Unformattable>, char>);
+    static_assert(!std::formattable<Option<int*>, char>);
+
+#ifdef CRAB_CPP_ENABLE_STRING
+    using namespace literal;
+    EXPECT_EQ(std::format("{}", Option<str>("crab"_s)), "Some(crab)");
+    EXPECT_EQ(std::format("{}", Option<String>("rust"_S)), "Some(rust)");
+#endif
+}
+
 #include "option_matrix.inl"
