@@ -5373,7 +5373,8 @@ struct StringHasher
 template<>
 struct std::formatter<crab_cpp::Char> : std::formatter<std::uint32_t>
 {
-    static auto format(const crab_cpp::Char& ch, std::format_context& ctx)
+    template<typename FormatContext>
+    static auto format(const crab_cpp::Char& ch, FormatContext& ctx)
     {
         return std::format_to(ctx.out(), "u{:x}", ch.code_point());
     }
@@ -5392,11 +5393,15 @@ export auto operator<<(std::ostream& os, const crab_cpp::Char& ch) -> std::ostre
 }
 
 template<>
-struct std::formatter<crab_cpp::str> : std::formatter<const char*>
+struct std::formatter<crab_cpp::str> : std::formatter<std::string_view>
 {
-    static auto format(const crab_cpp::str& str, std::format_context& ctx)
+    template<typename FormatContext>
+    auto format(const crab_cpp::str& str, FormatContext& ctx) const
     {
-        return std::format_to(ctx.out(), "{}", std::string_view(str.as_raw(), str.size()));
+        return std::formatter<std::string_view>::format(
+            std::string_view(str.as_raw(), str.size()),
+            ctx
+        );
     }
 };
 
@@ -5407,11 +5412,15 @@ export auto operator<<(std::ostream& os, const crab_cpp::str& str) -> std::ostre
 }
 
 template<typename Alloc>
-struct std::formatter<crab_cpp::raw::String<Alloc>> : std::formatter<const char*>
+struct std::formatter<crab_cpp::raw::String<Alloc>> : std::formatter<std::string_view>
 {
-    static auto format(const crab_cpp::raw::String<Alloc>& str, std::format_context& ctx)
+    template<typename FormatContext>
+    auto format(const crab_cpp::raw::String<Alloc>& str, FormatContext& ctx) const
     {
-        return std::format_to(ctx.out(), "{}", std::string_view(reinterpret_cast<const char*>(str.data()), str.size()));
+        return std::formatter<std::string_view>::format(
+            std::string_view(reinterpret_cast<const char*>(str.data()), str.size()),
+            ctx
+        );
     }
 };
 
